@@ -33,11 +33,14 @@ class NeuralNetwork:
         try:
             assert isinstance(inputs, list)
             assert isinstance(targets, list)
-        except TypeError:
+        except AssertionError:
             raise TypeError("NN training inputs and targets must both be type list. (two separate lists)")
 
+        inputs_array = np.array(inputs, ndmin=2).T
+        targets_array = np.array(targets)
+
         # Convert the inputs list into a 2D array and use to calculate signals into hidden layer
-        hidden_inputs = np.dot(self.wih, np.array(inputs, ndmin=2).T)
+        hidden_inputs = np.dot(self.wih, inputs_array)
 
         # Calculates the signals emerging from hidden layer
         hidden_outputs = self.activation_function(hidden_inputs)
@@ -49,7 +52,7 @@ class NeuralNetwork:
         final_outputs = self.activation_function(final_inputs)
 
         # Calculate current error as = target - actual
-        output_errors = np.array(targets, ndmin=2).T - final_outputs
+        output_errors = targets_array - final_outputs
 
         # Hidden layer errors are the output errors, split by the weights, recombined at the hidden nodes
         hidden_errors = np.dot(self.who.T, output_errors)
@@ -61,9 +64,9 @@ class NeuralNetwork:
         # Update the weights for the links between the input and hidden layers
         # TODO: Change second dot product input to np.array(inputs, ndmin=2) after NN is working
         self.wih += self.lr * np.dot((hidden_errors * hidden_outputs * (1.0 - hidden_outputs)),
-                                     np.transpose(np.array(inputs, ndmin=2).T))
+                                     np.transpose(inputs_array))
 
-        return None
+        return output_errors
 
     def queryNN(self, inputs):
         """
@@ -73,7 +76,7 @@ class NeuralNetwork:
         """
         try:
             assert isinstance(inputs, list)
-        except TypeError:
+        except AssertionError:
             raise TypeError("NN query inputs must be type list.")
 
         # Convert the inputs list into a 2D array and use to calculate signals into hidden layer
@@ -83,7 +86,7 @@ class NeuralNetwork:
         hidden_outputs = self.activation_function(hidden_inputs)
 
         # Calculate signals into final layer
-        final_inputs = np.dot(self.wih, hidden_outputs)
+        final_inputs = np.dot(self.who, hidden_outputs)
 
         final_outputs = self.activation_function(final_inputs)
 
