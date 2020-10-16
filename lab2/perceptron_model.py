@@ -31,7 +31,7 @@ def perceptron(inputBits, nodeWeights, bias, activationFunction=unitStep):
 
     return activationFunction(summed)
 
-def plotResults(inputBitPairs, weights, bias):
+def plotResults(inputBitPairs, weights, bias, logicFunction):
     # Create array to collect perceptron outputs purely for use in generating XOR graph in specific notebook
     xorInputs = []
 
@@ -48,9 +48,9 @@ def plotResults(inputBitPairs, weights, bias):
     plt.xlim(-0.5, 2)
     plt.ylim(-0.5, 2)
 
-    plt.xlabel("input bit 1")
-    plt.ylabel("input bit 2")
-    plt.title("State space of input vector")
+    plt.xlabel("x1")
+    plt.ylabel("x2")
+    plt.title("State space for {}".format(logicFunction))
 
     plt.grid(True, linewidth=1, linestyle=':')
 
@@ -61,7 +61,8 @@ def plotResults(inputBitPairs, weights, bias):
     x = np.linspace(-5, 5, 4)
     y = (m * x) + c
 
-    plt.plot(x, y, linewidth=2, label = 'X2 = (-W1/W2)X1 - b/W2')
+    label = "x2 = {}x1 + {}".format(m, c)
+    plt.plot(x, y, linewidth=2, label = label)
     plt.legend(loc = 'upper left')
     plt.tight_layout()
 
@@ -77,7 +78,8 @@ def plotXORResults(originalInputs,
                    inputsFromAND,
                    inputsFromOR,
                    weights,
-                   bias):
+                   bias,
+                   logicFunction="XOR"):
     for x1, x2, originalInput in zip(inputsFromAND, inputsFromOR, originalInputs):
         # Conditional color selection based on perceptron output
         result = perceptron([x1,x2], weights, bias)
@@ -89,9 +91,9 @@ def plotXORResults(originalInputs,
     plt.xlim(-0.5, 2)
     plt.ylim(-0.5, 2)
 
-    plt.xlabel("input bit 1")
-    plt.ylabel("input bit 2")
-    plt.title("State space of input vector")
+    plt.xlabel("x1")
+    plt.ylabel("x2")
+    plt.title("State space of {}".format(logicFunction))
 
     plt.grid(True, linewidth=1, linestyle=':')
 
@@ -107,8 +109,11 @@ def plotXORResults(originalInputs,
     x2 = np.linspace(-5, 5, 4)
     y2 = (m2 * x2) + c2
 
-    plt.plot(x1, y1, linewidth=2, label = 'X2 = (-W1/W2)X1 - b/W2')
-    plt.plot(x2, y2, linewidth=2, label='X2 = (-W1/W2)X1 - b/W2')
+    label1 = "x2 = {}x1 + {}".format(m1, c1)
+    label2 = "x2 = {}x1 + {}".format(m2, c2)
+
+    plt.plot(x1, y1, linewidth=2, label = label1)
+    plt.plot(x2, y2, linewidth=2, label=label2)
     plt.legend(loc = 'upper left')
     plt.tight_layout()
 
