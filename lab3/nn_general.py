@@ -37,7 +37,7 @@ class NeuralNetwork:
             raise TypeError("NN training inputs and targets must both be type list. (two separate lists)")
 
         inputs_array = np.array(inputs, ndmin=2).T
-        targets_array = np.array(targets)
+        targets_array = np.array(targets, ndmin=2).T
 
         # Convert the inputs list into a 2D array and use to calculate signals into hidden layer
         hidden_inputs = np.dot(self.wih, inputs_array)
@@ -58,11 +58,10 @@ class NeuralNetwork:
         hidden_errors = np.dot(self.who.T, output_errors)
 
         # Update the weights for the links between the hidden and output layers
-        self.who += self.lr * np.dot((output_errors * final_outputs * (1.0-final_outputs)),
+        self.who += self.lr * np.dot((output_errors * final_outputs * (1.0 - final_outputs)),
                                      np.transpose(hidden_outputs))
 
         # Update the weights for the links between the input and hidden layers
-        # TODO: Change second dot product input to np.array(inputs, ndmin=2) after NN is working
         self.wih += self.lr * np.dot((hidden_errors * hidden_outputs * (1.0 - hidden_outputs)),
                                      np.transpose(inputs_array))
 
