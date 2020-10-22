@@ -21,37 +21,30 @@ class NeuralNetwork:
         self.who = np.random.normal(0.0, pow(self.output_nodes, -0.5), (self.output_nodes, self.hidden_nodes))
 
         # Set the activation function as the logistic sigmoid
-        self.activation = self.getActivationFunction(activation_function)
-        self.error_function = self.getErrorFunction(error_function)
+        self.activationFunc = self.getActivationFunc(activation_function)
+        self.activationDeriv = self.getActivationDeriv(activation_function)
+        self.errorFunc = self.getErrorFunction(error_function)
 
         # Declare attributes to persist neuron outputs
         self.hidden_outputs = None
         self.final_outputs = None
 
-    def train(self, inputs, targets):
+    def fit(self, inputs, targets):
         """
         Function calculates new weights for NN using back propagation of errors
         :param inputs: input vectors as list
         :param targets:
         :return: no return
         """
-        try:
-            assert isinstance(inputs, list)
-            assert isinstance(targets, list)
-        except AssertionError:
-            raise TypeError("NN training inputs and targets must both be type list. (two separate lists)")
-
-        inputs_array = np.array(inputs, ndmin=2).T
-        targets_array = np.array(targets, ndmin=2).T
 
         # Forward propagate inputs through network
-        self.forwardProp(inputs_array)
+        self.forwardProp(inputs)
 
         # Calculate output error with selected error function, default == 'difference'
-        output_errors = self.error_function(targets_array, self.final_outputs)
+        output_errors = self.errorFunc(targets, self.final_outputs)
 
         # Backwards propagate
-        self.backProp(inputs_array, output_errors)
+        self.backProp(inputs, output_errors)
 
         return output_errors
 
@@ -60,16 +53,15 @@ class NeuralNetwork:
         hidden_inputs = np.dot(self.wih, inputs_array)
 
         # Calculates activation of hidden neurons
-        self.hidden_outputs = self.activation(hidden_inputs)
+        self.hidden_outputs = self.activationFunc(hidden_inputs)
 
         # Calculates the weighted input into final layer
         final_inputs = np.dot(self.who, self.hidden_outputs)
 
         # Calculates activation of final (output) neurons
-        self.final_outputs = self.activation(final_inputs)
+        self.final_outputs = self.activationFunc(final_inputs)
 
     def backProp(self, inputs_array, output_errors):
-
         # Hidden layer errors are the output errors, split by the weights, recombined at the hidden nodes
         hidden_errors = np.dot(self.who.T, output_errors)
 
@@ -96,17 +88,17 @@ class NeuralNetwork:
         hidden_inputs = np.dot(self.wih, np.array(inputs, ndmin=2).T)
 
         # Calculate output from the hidden layer
-        hidden_outputs = self.activation(hidden_inputs)
+        hidden_outputs = self.activationFunc(hidden_inputs)
 
         # Calculate signals into final layer
         final_inputs = np.dot(self.who, hidden_outputs)
 
-        final_outputs = self.activation(final_inputs)
+        final_outputs = self.activationFunc(final_inputs)
 
         return final_outputs
 
     @staticmethod
-    def getActivationFunction(activation_function):
+    def getActivationFunc(activation_function):
         if activation_function == 'sigmoid':
             return lambda x: scipy.special.expit(x)
         elif activation_function == 'relu':
@@ -121,9 +113,20 @@ class NeuralNetwork:
         if error_function == 'difference':
             return lambda x1, x2: np.subtract(x1, x2)
         elif error_function == 'mse':
-            return lambda x1, x2: np.square(np.subtract(x1, x2)).mean()
+            return lambda x1, x2: np.square(np.subtract(x1, x2)).mean() # should be equivalent to /2
         else:
             raise ValueError("Please make sure you specify an error function from the list.")
+
+    @staticmethod
+    def getActivationDeriv(activation_function):
+        if activation_function == 'sigmoid':
+            return lambda x: scipy.special.expit(x)
+        elif activation_function == 'relu':
+            return lambda x: np.maximum(x, 0)
+        elif activation_function == 'tanh':
+            return lambda x: (2/(1 + np.exp(-2*x))) -1
+        else:
+            raise ValueError("Please make sure you specify an activation function from the list.")
 
 def batchTrain(data_training,
                data_validation,
@@ -157,7 +160,7 @@ def batchTrain(data_training,
             # Train network for each row in batch,
             for row in data_batch:
                 inputs, targets = imageToTrainingInputs(row, nn.output_nodes)
-                nn.train(inputs, targets)
+                nn.fit(inputs, targets)
 
             batchStart = batchEnd + 1
             batchEnd += batchSize
@@ -238,6 +241,12 @@ def plotLearningCurve(epoch, trainingCurve, validationCurve):
     plt.show()
 
 def imageToTrainingInputs(row, output_nodes):
+    """
+    Function simply converts row of pixel data (plus first item is label) from MNIST .csv file into np array
+    :param row: list of comma separated pixel values
+    :param output_nodes: number of output nodes for network
+    :return: returns numpy array of (28*28=) 784 input values and 10 target output values (for digits 0-9)
+    """
     # Split the record by the commas
     pixelValues = row.split(',')
     label = pixelValues.pop(0)
@@ -251,4 +260,7 @@ def imageToTrainingInputs(row, output_nodes):
     # pixelValues[0] is the target label for this record
     targets[int(label)] = 0.99
 
-    return inputs.tolist(), targets.tolist()
+    inputs = np.array(inputs.tolist(), ndmin=2).T
+    targets = np.array(targets.tolist(), ndmin=2).T
+
+    return inputs, targets
