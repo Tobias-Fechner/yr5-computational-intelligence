@@ -246,7 +246,7 @@ def test(data, nn):
 def checkEarlyStop(performances, epoch, patience, patienceInitial, window=5, tolerance=0.05):
     # TODO: Implement gradient check of performances to stop early if validation performance starts to decrease.
     # Check for opportunity for early stopping
-    if len(performances) > window:
+    if len(performances) >= window:
         mean = sum(performances[-window:]) / window
         variance = sum((i - mean) ** 2 for i in performances[-window:]) / window
 
