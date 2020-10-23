@@ -1,6 +1,7 @@
 import scipy.special
 import numpy as np
 import matplotlib.pyplot as plt
+import math
 
 class NeuralNetwork:
     def __init__(self, input_nodes, hidden_nodes, output_nodes, lr, activation_function='sigmoid', error_function='difference'):
@@ -21,13 +22,13 @@ class NeuralNetwork:
         self.who = np.random.normal(0.0, pow(self.output_nodes, -0.5), (self.output_nodes, self.hidden_nodes))
 
         # Set the activation function as the logistic sigmoid
-        self.activationFunc = self.getActivationFunc(activation_function)
-        self.activationDeriv = self.getActivationDeriv(activation_function)
-        self.errorFunc = self.getErrorFunction(error_function)
+        self.activationFunc, self.activationDeriv = self.getActivationFuncs(activation_function)
+        self.errorFunc, self.errorDeriv = self.getErrorFuncs(error_function)
+        self.inputsDeriv = None
 
         # Declare attributes to persist neuron outputs
-        self.hidden_outputs = None
-        self.final_outputs = None
+        self.hiddenActivations = None
+        self.finalActivations = None
 
     def fit(self, inputs, targets):
         """
@@ -38,13 +39,13 @@ class NeuralNetwork:
         """
 
         # Forward propagate inputs through network
-        self.forwardProp(inputs)
+        final_inputs = self.forwardProp(inputs)
 
         # Calculate output error with selected error function, default == 'difference'
-        output_errors = self.errorFunc(targets, self.final_outputs)
+        output_errors = self.errorFunc(targets, self.finalActivations)
 
         # Backwards propagate
-        self.backProp(inputs, output_errors)
+        self.backProp(inputs, output_errors, final_inputs, targets)
 
         return output_errors
 
@@ -53,24 +54,34 @@ class NeuralNetwork:
         hidden_inputs = np.dot(self.wih, inputs_array)
 
         # Calculates activation of hidden neurons
-        self.hidden_outputs = self.activationFunc(hidden_inputs)
+        self.hiddenActivations = self.activationFunc(hidden_inputs)
 
         # Calculates the weighted input into final layer
-        final_inputs = np.dot(self.who, self.hidden_outputs)
+        final_inputs = np.dot(self.who, self.hiddenActivations)
 
         # Calculates activation of final (output) neurons
-        self.final_outputs = self.activationFunc(final_inputs)
+        self.finalActivations = self.activationFunc(final_inputs)
 
-    def backProp(self, inputs_array, output_errors):
+        return final_inputs
+
+    def backProp(self, inputs_array, output_errors, final_inputs, targets):
         # Hidden layer errors are the output errors, split by the weights, recombined at the hidden nodes
         hidden_errors = np.dot(self.who.T, output_errors)
 
+        # # Derivatives for output layer weights updates
+        # activationDeriv = self.activationDeriv(final_inputs)
+        # errorDeriv = self.errorDeriv(self.finalActivations, targets)
+        # inputsDeriv = np.transpose(self.hiddenActivations)
+        #
+        # # Combine all the derivatives for the links between the hidden and output layers
+        # self.who += self.lr * np.dot(errorDeriv, activationDeriv, inputsDeriv)
+
         # Update the weights for the links between the hidden and output layers
-        self.who += self.lr * np.dot((output_errors * self.final_outputs * (1.0 - self.final_outputs)),
-                                     np.transpose(self.hidden_outputs))
+        self.who += self.lr * np.dot((output_errors * self.finalActivations * (1.0 - self.finalActivations)),
+                                     np.transpose(self.hiddenActivations))
 
         # Update the weights for the links between the input and hidden layers
-        self.wih += self.lr * np.dot((hidden_errors * self.hidden_outputs * (1.0 - self.hidden_outputs)),
+        self.wih += self.lr * np.dot((hidden_errors * self.hiddenActivations * (1.0 - self.hiddenActivations)),
                                      np.transpose(inputs_array))
 
     def query(self, inputs):
@@ -97,46 +108,63 @@ class NeuralNetwork:
 
         return final_outputs
 
+    def decayLR(self, epoch, lrInitial):
+        drop = 0.6
+        epochsDrop = 6.0
+        self.lr = lrInitial * math.pow(drop, math.floor((1 + epoch) / epochsDrop))
+        if epoch % epochsDrop == 0:
+            print("LR has decayed after {} cycles. New lr = {}".format(epochsDrop, self.lr))
+
     @staticmethod
-    def getActivationFunc(activation_function):
+    def getActivationFuncs(activation_function):
         if activation_function == 'sigmoid':
-            return lambda x: scipy.special.expit(x)
+            func = lambda x: scipy.special.expit(x)
+            funcPrime = lambda x: scipy.special.expit(x) * (1 - scipy.special.expit(x))
+            return func, funcPrime
+
         elif activation_function == 'relu':
-            return lambda x: np.maximum(x, 0)
+            func = lambda x: np.maximum(x, 0)
+            funcPrime = []
+            return func, funcPrime
+
         elif activation_function == 'tanh':
-            return lambda x: (2/(1 + np.exp(-2*x))) -1
+            func = lambda x: (2/(1 + np.exp(-2*x))) -1
+            funcPrime = []
+            return func, funcPrime
         else:
             raise ValueError("Please make sure you specify an activation function from the list.")
 
     @staticmethod
-    def getErrorFunction(error_function):
+    def getErrorFuncs(error_function):
         if error_function == 'difference':
-            return lambda x1, x2: np.subtract(x1, x2)
+            func = lambda x1, x2: np.subtract(x1, x2)
+            funcPrime = None
+            return func, funcPrime
+
+        elif error_function == 'difference-squared':
+            func = lambda x1, x2: np.subtract(x1, x2) #should be np.square(np.subtract(x1, x2)) / 2
+            funcPrime = lambda x1, x2: np.subtract(x1, x2)
+            return func, funcPrime
+
         elif error_function == 'mse':
-            return lambda x1, x2: np.square(np.subtract(x1, x2)).mean() # should be equivalent to /2
+            func = lambda x1, x2: np.square(np.subtract(x1, x2)).mean() # taking mean should be equivalent to /2
+            funcPrime = None
+            return func, funcPrime
         else:
             raise ValueError("Please make sure you specify an error function from the list.")
-
-    @staticmethod
-    def getActivationDeriv(activation_function):
-        if activation_function == 'sigmoid':
-            return lambda x: scipy.special.expit(x)
-        elif activation_function == 'relu':
-            return lambda x: np.maximum(x, 0)
-        elif activation_function == 'tanh':
-            return lambda x: (2/(1 + np.exp(-2*x))) -1
-        else:
-            raise ValueError("Please make sure you specify an activation function from the list.")
 
 def batchTrain(data_training,
                data_validation,
                nn,
                batchSize=None,
                epochs=20,
-               plotCurves=True):
+               plotCurves=True,
+               patienceInitial=4):
 
     trainingCurve = []
     validationCurve = []
+    lrInitial = getattr(nn, 'lr')
+    patience = patienceInitial
 
     # Allocate batch sizes for batch training. If no batch size specified, take full dataset as single batch (batch gradient descent)
     if not batchSize:
@@ -148,6 +176,7 @@ def batchTrain(data_training,
 
     # Train for n training cycles, where n = number of epochs
     for epoch in range(epochs):
+        print("epoch: ", epoch)
         # Set initial batch
         batchStart = 0
         batchEnd = batchSize - 1
@@ -176,10 +205,12 @@ def batchTrain(data_training,
             pass
 
         # Check for early stopping opportunity
-        if checkStagnation(validationCurve, epoch):
+        earlyStopCheck, patience = checkEarlyStop(validationCurve, epoch, patience, patienceInitial)
+        if earlyStopCheck:
             break
         else:
-            pass
+            # Step-decay learning rate for given number of epochs
+            nn.decayLR(epoch, lrInitial)
 
     return nn, trainingCurve, validationCurve
 
@@ -212,20 +243,32 @@ def test(data, nn):
 
     return successRate
 
-def checkStagnation(performances, epoch, window=5, tolerance=0.05):
+def checkEarlyStop(performances, epoch, patience, patienceInitial, window=5, tolerance=0.05):
+    # TODO: Implement gradient check of performances to stop early if validation performance starts to decrease.
     # Check for opportunity for early stopping
     if len(performances) > window:
         mean = sum(performances[-window:]) / window
         variance = sum((i - mean) ** 2 for i in performances[-window:]) / window
 
         if variance < tolerance and (performances[-1] - performances[-2]) < tolerance:
-            print("Stopped early at epoch number {} with final variance of {}.\n".format(epoch, variance))
-            return True
+            # Drop patience when below variance tolerance
+            patience -= 1
+            if patience == 0:
+                print("Stopped early at epoch number {} with final variance of {}.\n".format(epoch, variance))
+                return True, patience
+            else:
+                print("We could stop early at epoch number {} with variance of {} but we can be patient for {} more training cycles.\n".format(epoch, variance, patience))
+                return False, patience
         else:
-            print("Variance of {} in last {} training cycles. Continuing training.".format(variance, window))
-            return False
+            # Reset patience when variance increases above threshold.
+            patience = patienceInitial
+            print("Variance of {} in last {} training cycles. Continuing training and resetting frustration to {}.".format(variance, window, patienceInitial))
+            return False, patience
+    elif 0 < len(performances) < window:
+        return False, patience
     else:
-        return False
+        raise Exception("Something wrong happened in the early stop checker.")
+
 
 def plotLearningCurve(epoch, trainingCurve, validationCurve):
     try:
