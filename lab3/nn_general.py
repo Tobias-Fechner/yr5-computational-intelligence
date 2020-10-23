@@ -112,7 +112,7 @@ class NeuralNetwork:
         drop = 0.6
         epochsDrop = 6.0
         self.lr = lrInitial * math.pow(drop, math.floor((1 + epoch) / epochsDrop))
-        if epoch % epochsDrop == 0:
+        if epoch % epochsDrop == 0 and epoch > 0:
             print("LR has decayed after {} cycles. New lr = {}".format(epochsDrop, self.lr))
 
     @staticmethod
