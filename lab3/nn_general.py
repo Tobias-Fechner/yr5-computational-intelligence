@@ -262,13 +262,12 @@ def checkEarlyStop(performances, epoch, patience, patienceInitial, window=5, tol
         else:
             # Reset patience when variance increases above threshold.
             patience = patienceInitial
-            print("Variance of {} in last {} training cycles. Continuing training and resetting frustration to {}.".format(variance, window, patienceInitial))
+            print("Variance of {} in last {} training cycles. Continuing training and resetting patience to {}.".format(variance, window, patienceInitial))
             return False, patience
     elif 0 < len(performances) < window:
         return False, patience
     else:
         raise Exception("Something wrong happened in the early stop checker.")
-
 
 def plotLearningCurve(epoch, trainingCurve, validationCurve):
     try:
