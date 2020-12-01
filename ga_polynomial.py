@@ -78,120 +78,149 @@ def getAvgAbsError(individual):
 
     return np.average(absErrors)
 
-def errorsToAvgFitness(errors):
+def getFitnesses(errors):
 
-    # Identify least fit individual
-    unfittest = max(errors)
+    target = np.zeros_like(errors)
+    compare = np.equal(target, errors)
 
-    # Calculate raw fitness of population (convert error into a fitness value)
-    rawFitnesses = np.subtract(unfittest, errors)
 
-    #TODO: Implement scaling of fitnesses
+    if np.sum(errors) == 0:
+        raise NotImplementedError
+    else:
+        fitnesses = np.divide(1,np.sum(errors))
 
-    return np.average(rawFitnesses)
+    return fitnesses, np.average(fitnesses)
 
-def getAvgPopulationFitness(population, error='mse'):
+def getAvgPopulationFitness(population, errorMethod='mse'):
     """
     Determines the fitness of a given individual by calculating MSE between prediction and target over a range of values of x.
     :param population: population of individuals
-    :param error: error calculation methodology
+    :param errorMethod: error calculation methodology
     :return: average fitness of population
     """
-    if 'mse' in error:
+    if 'mse' in errorMethod:
         # Calculate MSE for each individual in population (pre-fitness)
-        individualMSEs = [getMSE(individual) for individual in population]
+        errors = [getMSE(individual) for individual in population]
 
         # Return weighted average of raw fitnesses as fitness for entire population
-        return errorsToAvgFitness(individualMSEs)
+        _, avgFitness = getFitnesses(errors)
+        return avgFitness
 
-    elif 'abs' in error:
+    elif 'abs' in errorMethod:
         # Calculate average abs error for each individual in population
-        individualErrors = [getAvgAbsError(individual) for individual in population]
+        errors = [getAvgAbsError(individual) for individual in population]
 
-        return np.average(individualErrors)
+        return np.average(errors)
 
     else:
         raise ValueError("Please specify error calculation methodology that has been implemented.")
 
-def rouletteSelection(population):
+def selectByRoulette(population, retain, errorMethod):
 
-    fitnesses = np.array([])
+    # Calculate limit for number of parent chromosomes to select
+    poolSize = ceil(len(population) * retain)
+    logging.info("Desired mating pool size: {}".format(poolSize))
 
-    # Get total fitness of population (cumulative sum of each individual's error)
-    for individual in population:
+    errors = np.array([])
 
-        # Get errors for each individual
-        errors = getMSE(individual)
+    if 'mse' in errorMethod:
+        # Get total fitness of population (cumulative sum of each individual's error)
+        for individual in population:
+            # Get errors for each individual
+            errors = np.append(errors, getMSE(individual))
 
-        # Get fitness, append to list of fitnesses
-        fitness = errorsToAvgFitness(errors)
-        fitnesses = np.append(fitnesses, fitness)
+    elif 'abs' in errorMethod:
+        # Get total fitness of population (cumulative sum of each individual's error)
+        for individual in population:
+            # Get errors for each individual
+            errors = np.append(errors, getAvgAbsError(individual))
 
-    # Calculate total fitness for population as sum of individuals' fitness
-    totalFitness = np.sum(fitnesses)
+    else:
+        raise NotImplementedError("Please select an error method that has been implemented.")
 
-    # Calculate selection probability for each individual
-    selectProbabilities = np.divide(fitnesses, totalFitness)
+    logging.info("{} errors calculated for the {} individuals.".format(len(errors), len(population)))
+
+    # Get fitness, append to list of fitnesses
+    fitnesses, _ = getFitnesses(errors)
+
+    # Calculate selection probability for each individual as a proportion of total fitness for population
+    selectProbabilities = np.divide(fitnesses, np.sum(fitnesses))
 
     # Assert probabilities all are floats within range [0,1] and sum to 1
     assert 0 <= selectProbabilities.all() <= 1
     assert abs(np.sum(selectProbabilities) - 1) < 0.0001
 
-    matingPool = np.array([])
+    # Generate cumulative sum, used to ensure at least one individual is always chosen
+    selectProbabilitiesCS = np.cumsum(selectProbabilities)
+
+    matingPool = []
 
     # Select individuals to add to mating pool using probability based on fitness of individual
-    for individual, selectProbability in zip(population, selectProbabilities):
+    for individual, selectProbability in zip(population, selectProbabilitiesCS):
         if selectProbability > random():
-            matingPool = np.append(matingPool, individual)
+            matingPool.append(individual)
         else:
             pass
 
+        # Break when mating pool has reached size specified by retain parameter
+        if len(matingPool) >= poolSize:
+            break
+        else:
+            pass
+
+    logging.info("Returning from selection stage with mating pool size {}.".format(len(matingPool)))
+
+    assert len(matingPool) > 1
+
+    # Cast list to numpy array
+    matingPool = np.array(matingPool)
+
     # Return mating pool
-    return matingPool
+    return matingPool.astype(int)
 
+def selectByRandom(population, random_select, retain, errorMethod='mse'):
 
-def randomSelection(population, random_select, retain):
-    # Grade each individual within the population
-    individualGrades = [(getAvgAbsError(individual), individual) for individual in population]
+    # Calculate number of individuals to retain as matingPool of the next generation
+    retainLength = ceil(len(population)*retain)
+
+    if 'mse' in errorMethod:
+        # Grade each individual within the population
+        individualGrades = [(getMSE(individual), individual) for individual in population]
+    elif 'abs' in errorMethod:
+        # Grade each individual within the population
+        individualGrades = [(getAvgAbsError(individual), individual) for individual in population]
+    else:
+        raise NotImplementedError("Please select an error method that has been implemented.")
 
     # Rank population based on individual grades
     graded = [x[1] for x in sorted(individualGrades)]
 
-    # Calculate number of individuals to retain as matingPool of the next generation
-    retain_length = ceil(len(graded)*retain)
-
     # Retain the desired number of elements from the leading side of the list as the matingPool of next generation
-    matingPool = graded[:retain_length]
+    matingPool = graded[:retainLength]
 
     # Add other individuals to matingPool group to promote genetic diversity
-    for individual in graded[retain_length:]:
+    for individual in graded[retainLength:]:
 
         # Configured probability used to decide if each individual from remaining population is added to parent gene pool
         if random_select > random():
             matingPool.append(individual)
 
-    return matingPool, individualGrades
+    return matingPool
 
-def evolve(population, retain=0.2, random_select=0.05, mutate=0.01, femalePortion=0.5, select='roulette'):
+def mutateByRandom(matingPool, mutate):
 
-    # Assert all fractions between 0-1
-    assert 0 <= femalePortion <= 1
-    assert 0 <= random_select <= 1
-    assert 0 <= mutate <= 1
-    assert 0 <= retain <= 1
+    mutateCount = 0
 
-    if 'roulette' in select:
-        raise NotImplementedError
-    elif 'random' in select:
-        parents, individualGrades = randomSelection(population, random_select, retain)
-    else:
-        raise ValueError("Please specify a selection methodology that has been implemented.")
+    logging.info("Mating pool: {}".format(matingPool))
 
-    # Mutate some individuals
-    for individual in parents:
+    # Mutate some individuals by introducing a random integer within the range of the individuals min/ max values
+    # at a random index of the chromosome
+    for individual in matingPool:
 
         # Configured probability used to decide if each individual from parent gene pool is mutated
         if mutate > random():
+
+            logging.info("Individual: {}".format(individual))
 
             # Generate value to randomly index individual's contents
             randIndex = choice(range(len(individual)))
@@ -199,40 +228,61 @@ def evolve(population, retain=0.2, random_select=0.05, mutate=0.01, femalePortio
             # Generate a random integer between the individual's min/ max and store value using random index
             individual[randIndex] = randint(min(individual), max(individual))
 
+            mutateCount += 1
+
+    logging.info("{} chromosomes mutated.".format(mutateCount))
+
+    return matingPool
+
+def evolve(population, retain=0.2, random_select=0.05, mutate=0.01, femalePortion=0.5, select='roulette', errorMethod='abs'):
+
+    # Assert all fractions within range [0,1]
+    assert 0 <= femalePortion <= 1
+    assert 0 <= random_select <= 1
+    assert 0 <= mutate <= 1
+    assert 0 <= retain <= 1
+
+    if 'roulette' in select:
+        matingPool = selectByRoulette(population, retain, errorMethod)
+    elif 'random' in select:
+        matingPool = selectByRandom(population, random_select, retain, errorMethod)
+    else:
+        raise ValueError("Please specify a selection methodology that has been implemented.")
+
+    # Mutate some of the individuals within the mating pool
+    matingPool = mutateByRandom(matingPool, mutate)
+
     children = []
-    lenParents = len(parents)
-    desiredChildren = len(population) - lenParents
+    poolSize = len(matingPool)
+    desiredChildren = len(population) - poolSize
 
     # Create children from high performing parent group to maintain population size
     while len(children) < desiredChildren:
 
         # Get female and male index
-        femaleIndex = randint(0, lenParents-1)
-        maleIndex = randint(0, lenParents-1)
+        femaleIndex = randint(0, poolSize-1)
+        maleIndex = randint(0, poolSize-1)
 
         if maleIndex == femaleIndex:
-            pass
+            continue
 
         else:
 
             # Get female and male values
-            female = parents[femaleIndex]
-            male = parents[maleIndex]
+            female = matingPool[femaleIndex]
+            male = matingPool[maleIndex]
 
             # Determine proportion of female chromosomes to
             split = int(len(female)*femalePortion)
-            logging.info("Split at {}. Parent chromosomes: {}; Child gets {} from female and {} from male.".format(
-                split, len(male), len(female[:split]), len(male[split:])))
 
             # Split individual chromosomes based on desired female portion of chromosomes
             # Create child with half of male chromosomes and other half of female's chromosomes
             child = np.append(male[:split], female[split:])
-            logging.info("Child made with {} chromosomes.".format(len(child)))
 
             # Add child to list
             children.append(child)
 
     # Return list of children and parent individuals to be next generation
-    parents.extend(children)
+    nextGeneration = np.vstack((matingPool, children))
 
-    return parents, individualGrades
+    return nextGeneration
