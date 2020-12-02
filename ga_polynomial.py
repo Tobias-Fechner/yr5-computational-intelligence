@@ -78,7 +78,29 @@ def getAvgAbsError(individual):
 
     return np.average(absErrors)
 
-def getFitnesses(errors):
+def getFitnesses(population, errorMethod):
+
+    errors = np.array([])
+
+    if 'mse' in errorMethod:
+        # Get total fitness of population (cumulative sum of each individual's error)
+        for individual in population:
+            # Get errors for each individual
+            errors = np.append(errors, getMSE(individual))
+
+    elif 'abs' in errorMethod:
+        # Get total fitness of population (cumulative sum of each individual's error)
+        for individual in population:
+            # Get errors for each individual
+            errors = np.append(errors, getAvgAbsError(individual))
+
+    else:
+        raise NotImplementedError("Please select an error method that has been implemented.")
+
+    logging.info("{} errors calculated for the {} individuals.".format(len(errors), len(population)))
+
+    # Get fitness, append to list of fitnesses
+    fitnesses, _ = getFitnesses(errors)
 
     target = np.zeros_like(errors)
     compare = np.equal(target, errors)
@@ -121,27 +143,7 @@ def selectByRoulette(population, retain, errorMethod):
     poolSize = ceil(len(population) * retain)
     logging.info("Desired mating pool size: {}".format(poolSize))
 
-    errors = np.array([])
-
-    if 'mse' in errorMethod:
-        # Get total fitness of population (cumulative sum of each individual's error)
-        for individual in population:
-            # Get errors for each individual
-            errors = np.append(errors, getMSE(individual))
-
-    elif 'abs' in errorMethod:
-        # Get total fitness of population (cumulative sum of each individual's error)
-        for individual in population:
-            # Get errors for each individual
-            errors = np.append(errors, getAvgAbsError(individual))
-
-    else:
-        raise NotImplementedError("Please select an error method that has been implemented.")
-
-    logging.info("{} errors calculated for the {} individuals.".format(len(errors), len(population)))
-
-    # Get fitness, append to list of fitnesses
-    fitnesses, _ = getFitnesses(errors)
+    fitnesses = getFitnesses(population, errorMethod)
 
     # Calculate selection probability for each individual as a proportion of total fitness for population
     selectProbabilities = np.divide(fitnesses, np.sum(fitnesses))
