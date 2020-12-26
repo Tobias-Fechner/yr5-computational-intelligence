@@ -1,5 +1,8 @@
 from random import randint, random, uniform
 import numpy as np
+import logging
+logging.basicConfig()
+logging.getLogger().setLevel(logging.INFO)
 
 def individual(length, min, max):
     'Create a member of the population.'
@@ -27,6 +30,25 @@ def fitness(individual, target):
     error = np.subtract(target, individual)
     #sum = reduce(add, individual, 0)
     return sum(abs(error))
+
+def fitnessMSE(individual, target):
+    """
+    Determine the fitness of an individual. Higher is better.
+
+    individual: the individual to evaluate
+    target: the target number individuals are aiming for
+    """
+
+    # Calculate error as difference between each y value prediction and corresponding target
+    errors = np.subtract(target, individual)
+
+    # Square each error term
+    squaredErrors = np.power(errors, 2)
+
+    # Calculate weighted average of the squared errors array
+    meanSquaredErrors = np.average(squaredErrors)
+
+    return meanSquaredErrors
 
 def grade(pop, target):
     """
@@ -64,8 +86,8 @@ def selectRoulette(graded):
     sumError = sum(errors)
 
     # Calculate selection probabilities as fraction of individual's error out of the total errors
-    # Square probabilities to increase distinction between good and very good individuals
-    probabilities = [(1 - error/sumError)**4 for error in errors]
+    # Raise probabilities to power to increase distinction between good and very good individuals
+    probabilities = [(1 - error/sumError)**2 for error in errors]
 
     # Generate cumulative sum of probabilities so that individuals with least error are most likely to be picked
     probabilitiesCS = np.cumsum(probabilities)
@@ -80,9 +102,14 @@ def selectRoulette(graded):
 
     return parents
 
-def evolve(pop, target, retain=0.2, random_select=0.05, mutate=0.01, selectMethod='random'):
+def evolve(pop, target, retain=0.2, random_select=0.05, mutate=0.01, selectMethod='random', errorMethod='abs'):
 
-    graded = [(fitness(x, target), x) for x in pop]
+    if 'mse' in errorMethod:
+        graded = [(fitnessMSE(x, target), x) for x in pop]
+    elif 'abs' in errorMethod:
+        graded = [(fitness(x, target), x) for x in pop]
+    else:
+        raise NotImplementedError
 
     if 'random' in selectMethod:
         parents = selectRandom(graded, retain, random_select)
