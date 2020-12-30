@@ -2,6 +2,8 @@ import scipy.special
 import numpy as np
 import matplotlib.pyplot as plt
 import math
+import pandas as pd
+import utilities
 
 class NeuralNetwork:
     def __init__(self, input_nodes, hidden_nodes, output_nodes, lr, activation_function='sigmoid', error_function='difference'):
@@ -86,8 +88,8 @@ class NeuralNetwork:
 
     def query(self, inputs):
         """
-        Function to query the neural network.
-        :param inputs: List of inputs
+        Function used to query the neural network: pass one set of inputs and retrieve one set of predictions from the outputs.
+        :param inputs: List of input values
         :return: Returns outputs from final layer of nodes
         """
         try:
@@ -104,14 +106,28 @@ class NeuralNetwork:
         # Calculate signals into final layer
         final_inputs = np.dot(self.who, hidden_outputs)
 
+        # Calculate the outputs from the final layer, used to indicate the class of the spike waveform
         final_outputs = self.activationFunc(final_inputs)
 
         return final_outputs
 
     def decayLR(self, epoch, lrInitial):
+        """
+        Function decays the learning rate by a drop rate based on the number of epochs since the last time of decay. This is useful to refine the
+        updates made to weight during each training cycle and to increase the likelihood of finding the best possible local minima.
+        :param epoch: current epoch
+        :param lrInitial: initial learning rate set at start of training process
+        :return: No return needed as learning rate is stored in the attribute of the NeuralNetwork object.
+        """
+
+        # Drop rate to decay the learning rate by
         drop = 0.6
+        # Number of epochs to pass before learning rate is decayed
         epochsDrop = 6.0
+
+        # Set new learning rate using an exponential decay of learning rate
         self.lr = lrInitial * math.pow(drop, math.floor((1 + epoch) / epochsDrop))
+
         if epoch % epochsDrop == 0 and epoch > 0:
             print("LR has decayed after {} cycles. New lr = {}".format(epochsDrop, self.lr))
 
@@ -161,36 +177,40 @@ def batchTrain(data_training,
                plotCurves=True,
                patienceInitial=4):
 
+    assert isinstance(data_training, pd.DataFrame) and isinstance(data_validation, pd.DataFrame)
+
     trainingCurve = []
     validationCurve = []
     lrInitial = getattr(nn, 'lr')
     patience = patienceInitial
 
     # Allocate batch sizes for batch training. If no batch size specified, take full dataset as single batch (batch gradient descent)
-    if not batchSize:
-        batchSize = len(data_training)
-    else:
-        # Only allow batch sizes that don't discard any data (can improve later but low priority)
-        assert len(data_training) % batchSize == 0
-        pass
+    batchSize = utilities.getBatchSize(batchSize, data_training.shape[0])
 
     # Train for n training cycles, where n = number of epochs
     for epoch in range(epochs):
         print("epoch: ", epoch)
-        # Set initial batch
+
+        # Set the initial batch to start at the beginning of the dataset. The batch ends at the index determined by the desired batch size
         batchStart = 0
         batchEnd = batchSize - 1
 
-        # Train using chunks of full training dataset, where each chunk = batch size
-        while batchEnd <= len(data_training) - 1:
+        # Train the network using chunks of the full training dataset, where each chunk is of size batchSize
+        while batchEnd <= data_training.shape[0] - 1:
 
-            data_batch = data_training[batchStart:batchEnd]
+            # Create a batch (subset) of the data
+            batch = data_training.iloc[batchStart:batchEnd]
 
-            # Train network for each row in batch,
-            for row in data_batch:
+            # Train the network for each row in the batch
+            for index, row in batch.iterrows():
+
+                # Retrieve the inputs (spike waveforms) and target vectors (spike classes) to the network
                 inputs, targets = getInputsAndTargets(row, nn.output_nodes)
+
+                # Complete one cycle of forward propagation, error calculation and back propagation to update the network weights
                 nn.fit(inputs, targets)
 
+            # Update the batch subset of data
             batchStart = batchEnd + 1
             batchEnd += batchSize
 
@@ -198,13 +218,13 @@ def batchTrain(data_training,
         trainingCurve.append(test(data_training, nn))
         validationCurve.append(test(data_validation, nn))
 
-        # Plot learning curves showing training vs validation performance
+        # Plot learning curves showing training vs validation performance, useful during development and debugging
         if plotCurves and epoch > 0:
             plotLearningCurve(epoch+1, trainingCurve, validationCurve)
         else:
             pass
 
-        # Check for early stopping opportunity
+        # Check for early stopping opportunity by evaluating if the increase in performance has stagnated
         earlyStopCheck, patience = checkEarlyStop(validationCurve, epoch, patience, patienceInitial)
         if earlyStopCheck:
             break
@@ -215,16 +235,21 @@ def batchTrain(data_training,
     return nn, trainingCurve, validationCurve
 
 def test(data, nn):
+
+    # Ensure data is of type pandas dataframe
+    assert isinstance(data, pd.DataFrame)
+
+    # Create an empty string to accumulate the count of correct predictions
     scorecard = []
-    for record in data:
-        # Split the record by commas
-        pixelValues = record.split(',')
 
-        # Correct label is the first value
-        correct_label = int(pixelValues.pop(0))
+    # Iterate over each row in the data
+    for _, row in data.iterrows():
 
-        # Scale and shift the inputs
-        inputs = (np.asfarray(pixelValues) / 255.0 * 0.99) + 0.01
+        # Waveform values retrieved as the inputs to the network
+        inputs = row['waveform']
+
+        # Spike label retrieved to be used to check the output
+        label = int(row['class']) - 1
 
         # Query the network
         outputs = nn.query(inputs.tolist())
@@ -233,7 +258,7 @@ def test(data, nn):
         prediction = np.argmax(outputs)
 
         # Add to scorecard
-        if prediction == correct_label:
+        if prediction == label:
             scorecard.append(1)
         else:
             scorecard.append(0)
@@ -244,6 +269,16 @@ def test(data, nn):
     return successRate
 
 def checkEarlyStop(performances, epoch, patience, patienceInitial, window=5, tolerance=0.05):
+    """
+    Function evaluates the variance of the network over the trailing window
+    :param performances:
+    :param epoch:
+    :param patience:
+    :param patienceInitial:
+    :param window:
+    :param tolerance:
+    :return:
+    """
     # TODO: Implement gradient check of performances to stop early if validation performance starts to decrease.
     # Check for opportunity for early stopping
     if len(performances) >= window:
@@ -289,18 +324,17 @@ def getInputsAndTargets(row, output_nodes):
     :param output_nodes: number of output nodes for network
     :return: returns numpy array of (28*28=) 784 input values and 10 target output values (for digits 0-9)
     """
-    # Split the record by the commas
-    pixelValues = row.split(',')
-    label = pixelValues.pop(0)
+    # Retrieve the target label and account for non-zero count
+    label = int(row['class']) - 1
 
-    # Scale and shift the inputs from 0..255 to 0.01..1
-    inputs = (np.asfarray(pixelValues) / 255.0 * 0.99) + 0.01
+    # Retrieve waveform points as inputs array
+    inputs = row['waveform']
 
     # Create the target output values (all 0.01, except the desired label which is 0.99)
     targets = np.zeros(output_nodes) + 0.01
 
     # pixelValues[0] is the target label for this record
-    targets[int(label)] = 0.99
+    targets[label] = 0.99
 
     inputs = np.array(inputs.tolist(), ndmin=2).T
     targets = np.array(targets.tolist(), ndmin=2).T
