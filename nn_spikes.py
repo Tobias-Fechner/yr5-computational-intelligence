@@ -215,8 +215,11 @@ def batchTrain(data_training,
             batchEnd += batchSize
 
         # Collect performance on training and validation datasets for each epoch
-        trainingCurve.append(test(data_training, nn))
-        validationCurve.append(test(data_validation, nn))
+        successTraining, data_training['classPrediction'] = test(data_training, nn)
+        successValidation, data_validation['classPrediction'] = test(data_validation, nn)
+
+        trainingCurve.append(successTraining)
+        validationCurve.append(successValidation)
 
         # Plot learning curves showing training vs validation performance, useful during development and debugging
         if plotCurves and epoch > 0:
@@ -232,7 +235,7 @@ def batchTrain(data_training,
             # Step-decay learning rate for given number of epochs
             nn.decayLR(epoch, lrInitial)
 
-    return nn, trainingCurve, validationCurve
+    return nn, trainingCurve, validationCurve, data_training, data_validation
 
 def test(data, nn):
 
@@ -241,6 +244,7 @@ def test(data, nn):
 
     # Create an empty string to accumulate the count of correct predictions
     scorecard = []
+    predicted = []
 
     # Iterate over each row in the data
     for _, row in data.iterrows():
@@ -263,10 +267,13 @@ def test(data, nn):
         else:
             scorecard.append(0)
 
+        # Correct label predicted to account for non-zero counting of neuron types and append to list of classified action potentials
+        predicted.append(prediction+1)
+
     scorecard = np.asarray(scorecard)
     successRate = (scorecard.sum() / scorecard.size) * 100
 
-    return successRate
+    return successRate, predicted
 
 def checkEarlyStop(performances, epoch, patience, patienceInitial, window=5, tolerance=0.05):
     """
