@@ -253,7 +253,7 @@ def test(data, nn):
         inputs = row['waveform']
 
         # Spike label retrieved to be used to check the output
-        label = int(row['class']) - 1
+        label = int(row['knownClass']) - 1
 
         # Query the network
         outputs = nn.query(inputs.tolist())
@@ -332,7 +332,7 @@ def getInputsAndTargets(row, output_nodes):
     :return: returns numpy array of (28*28=) 784 input values and 10 target output values (for digits 0-9)
     """
     # Retrieve the target label and account for non-zero count
-    label = int(row['class']) - 1
+    label = int(row['knownClass']) - 1
 
     # Retrieve waveform points as inputs array
     inputs = row['waveform']

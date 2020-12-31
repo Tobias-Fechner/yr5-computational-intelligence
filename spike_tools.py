@@ -20,7 +20,7 @@ def joinSpikes(data, spikes):
     return data
 
 
-def splitData(data, spikes):
+def splitData(data, trainingShare=0.8):
 
     try:
         assert all(col in data.columns for col in ['knownSpike', 'knownClass', 'predictedSpike', 'predictedClass'])
@@ -28,8 +28,7 @@ def splitData(data, spikes):
         raise AssertionError("Prep your data please. Run joinSpikes().")
 
     # Get split index
-    splitSpike = int(len(spikes) * 3 / 4)
-    splitIndex = spikes.iloc[splitSpike]['index']
+    splitIndex = int(data.shape[0] * trainingShare)
 
     # Return training and validation data
     return data.iloc[:splitIndex], data.iloc[splitIndex:]
@@ -47,7 +46,7 @@ def bandPassFilter(signal, lowCut=300.00, highCut=3000.00, sampleRate=25000, ord
     return signalFiltered
 
 
-def detectPeaks(data, threshold=1.0):
+def detectPeaks(data, threshold=0.85):
     df = data.loc[data['signalFiltered'] > threshold]
 
     peaks = df[(df['signalFiltered'].shift(1) < df['signalFiltered']) &
@@ -59,11 +58,20 @@ def detectPeaks(data, threshold=1.0):
     if 'predictedClass' not in data.columns:
         data.insert(len(data.columns), 'predictedClass', 0)
 
-    data.loc[peaks.index, 'predictedSpike'] = True
+    # Create series of
+    s = pd.Series(peaks.index)
 
-    print("{} peaks detected.".format(len(peaks.index)))
+    doubleCounts = s.loc[s-s.shift(1)<10]
 
-    return data, peaks.index
+    # Drop indexes of detected peaks if they occur within 10 points of another peak and store as spike indexes
+    # Detected spike indexes are shifted by X points to align with labeled dataset used during training and improve similarity to waveforms expected by MLP model
+    spikeIndexes = peaks.index.drop(labels=doubleCounts) - 8
+
+    data.loc[spikeIndexes, 'predictedSpike'] = True
+
+    print("{} peaks detected.".format(len(spikeIndexes)))
+
+    return data, spikeIndexes
 
 def getSpikeWaveforms(peakIndexes, data, window=100):
     """
@@ -94,25 +102,26 @@ def getSpikeWaveforms(peakIndexes, data, window=100):
     return data
 
 
-def plotSpikes(signal, spikes):
+def plotSpikes(signals, spikes):
     """
     Function used to plot detected spikes against signal. Can be used to compare predicted vs. truths.
-    :param offset:
-    :param signal: pandas series containing original signal data
+    :param signals: pandas series containing original signal data
     :param spikes: list of pandas series containing spike locations dtype=Bool
     :return: None
     """
-    assert isinstance(spikes, list)
-    assert isinstance(signal, pd.Series) and isinstance(spikes[0], pd.Series)
+    assert isinstance(spikes, list) and isinstance(signals, list)
+    assert isinstance(signals[0], pd.Series) and isinstance(spikes[0], pd.Series)
 
     fig = go.Figure()
 
-    fig.add_trace(go.Scatter(
-        x=signal.index,
-        y=signal,
-        mode='lines',
-        name=signal.name
-    ))
+    for signal in signals:
+        fig.add_trace(go.Scatter(
+            x=signal.index,
+            y=signal,
+            mode='lines',
+            name=signal.name,
+            opacity=0.5,
+        ))
 
     for spikeGroup in spikes:
 
@@ -120,10 +129,10 @@ def plotSpikes(signal, spikes):
 
         fig.add_trace(go.Scatter(
             x=spikeLocations,
-            y=[signal[j] for j in spikeLocations],
+            y=[signals[0][j] for j in spikeLocations],
             mode='markers',
             marker=dict(
-                size=6,
+                size=8,
                 symbol='cross'
             ),
             name=spikeGroup.name
