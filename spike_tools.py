@@ -20,7 +20,7 @@ def joinSpikes(data, spikes):
     return data
 
 
-def splitData(data, predictedSpikeIndexes, trainingShare=0.8):
+def splitData(data, spikeIndexes, trainingShare=0.8):
 
     try:
         assert all(col in data.columns for col in ['knownSpike', 'knownClass', 'predictedSpike', 'predictedClass'])
@@ -33,9 +33,11 @@ def splitData(data, predictedSpikeIndexes, trainingShare=0.8):
     data_training = data.iloc[:splitIndex]
     data_validation = data.iloc[splitIndex:]
 
-    lastTrainingSpike = len(data_training[data_training['predictedSpike'] == True])
-    spikeIndexes_training = predictedSpikeIndexes[:lastTrainingSpike]
-    spikeIndexes_validation = predictedSpikeIndexes[lastTrainingSpike:]
+    lastTrainingSpike = spikeIndexes[spikeIndexes < len(data_training)][-1]
+    spikeSplitIndex = list(spikeIndexes).index(lastTrainingSpike) + 1
+
+    spikeIndexes_training = spikeIndexes[:spikeSplitIndex]
+    spikeIndexes_validation = spikeIndexes[spikeSplitIndex:]
 
     # Return training and validation data
     return data_training, data_validation, spikeIndexes_training, spikeIndexes_validation
