@@ -51,9 +51,9 @@ class NeuralNetwork:
 
         return output_errors
 
-    def forwardProp(self, inputs_array):
+    def forwardProp(self, inputs):
         # Calculate weighted input into hidden layer
-        hidden_inputs = np.dot(self.wih, inputs_array)
+        hidden_inputs = np.dot(self.wih, inputs)
 
         # Calculates activation of hidden neurons
         self.hiddenActivations = self.activationFunc(hidden_inputs)
@@ -92,13 +92,8 @@ class NeuralNetwork:
         :param inputs: List of input values
         :return: Returns outputs from final layer of nodes
         """
-        try:
-            assert isinstance(inputs, list)
-        except AssertionError:
-            raise TypeError("NN query inputs must be type list.")
-
         # Convert the inputs list into a 2D array and use to calculate signals into hidden layer
-        hidden_inputs = np.dot(self.wih, np.array(inputs, ndmin=2).T)
+        hidden_inputs = np.dot(self.wih, inputs)
 
         # Calculate output from the hidden layer
         hidden_outputs = self.activationFunc(hidden_inputs)
@@ -109,7 +104,7 @@ class NeuralNetwork:
         # Calculate the outputs from the final layer, used to indicate the class of the spike waveform
         final_outputs = self.activationFunc(final_inputs)
 
-        return final_outputs
+        return np.argmax(final_outputs)
 
     def decayLR(self, epoch, lrInitial):
         """
@@ -171,11 +166,26 @@ class NeuralNetwork:
 
 def batchTrain(data_training,
                data_validation,
+               spikeIndexes_training,
+               spikeIndexes_validation,
                nn,
                batchSize=None,
                epochs=20,
                plotCurves=True,
                patienceInitial=4):
+    """
+
+    :param data_training:
+    :param data_validation:
+    :param spikeIndexes_training:
+    :param spikeIndexes_validation:
+    :param nn:
+    :param batchSize:
+    :param epochs:
+    :param plotCurves:
+    :param patienceInitial:
+    :return:
+    """
 
     assert isinstance(data_training, pd.DataFrame) and isinstance(data_validation, pd.DataFrame)
 
@@ -202,10 +212,10 @@ def batchTrain(data_training,
             batch = data_training.iloc[batchStart:batchEnd]
 
             # Train the network for each row in the batch
-            for index, row in batch.iterrows():
+            for index in spikeIndexes_training:
 
                 # Retrieve the inputs (spike waveforms) and target vectors (spike classes) to the network
-                inputs, targets = getInputsAndTargets(row, nn.output_nodes)
+                inputs, targets, _ = getInputsAndTargets(data_training.loc[index, 'waveform'], nn.output_nodes, batch.loc[index-10:index+5, 'knownClass'])
 
                 # Complete one cycle of forward propagation, error calculation and back propagation to update the network weights
                 nn.fit(inputs, targets)
@@ -215,8 +225,8 @@ def batchTrain(data_training,
             batchEnd += batchSize
 
         # Collect performance on training and validation datasets for each epoch
-        successTraining, data_training['classPrediction'] = test(data_training, nn)
-        successValidation, data_validation['classPrediction'] = test(data_validation, nn)
+        successTraining, data_training.loc[spikeIndexes_training, 'classPrediction'] = test(data_training, spikeIndexes_training, nn)
+        successValidation, data_validation.loc[spikeIndexes_validation, 'classPrediction'] = test(data_validation, spikeIndexes_validation, nn)
 
         trainingCurve.append(successTraining)
         validationCurve.append(successValidation)
@@ -237,7 +247,7 @@ def batchTrain(data_training,
 
     return nn, trainingCurve, validationCurve, data_training, data_validation
 
-def test(data, nn):
+def test(data, spikeIndexes, nn):
 
     # Ensure data is of type pandas dataframe
     assert isinstance(data, pd.DataFrame)
@@ -246,20 +256,13 @@ def test(data, nn):
     scorecard = []
     predicted = []
 
-    # Iterate over each row in the data
-    for _, row in data.iterrows():
+    # Train the network for each row in the batch
+    for index in spikeIndexes:
+        # Retrieve the inputs (spike waveforms) and target vectors (spike classes) to the network
+        inputs, _, label = getInputsAndTargets(data.loc[index, 'waveform'], nn.output_nodes, data.loc[index-10:index+5, 'knownClass'])
 
-        # Waveform values retrieved as the inputs to the network
-        inputs = row['waveform']
-
-        # Spike label retrieved to be used to check the output
-        label = int(row['knownClass']) - 1
-
-        # Query the network
-        outputs = nn.query(inputs.tolist())
-
-        # Identify predicted label
-        prediction = np.argmax(outputs)
+        # Query the network to identify the predicted output
+        prediction = nn.query(inputs)
 
         # Add to scorecard
         if prediction == label:
@@ -324,18 +327,42 @@ def plotLearningCurve(epoch, trainingCurve, validationCurve):
     plt.legend()
     plt.show()
 
-def getInputsAndTargets(row, output_nodes):
+def getInputsAndTargets(waveform, output_nodes, knownClasses):
     """
     Function simply converts row of pixel data (plus first item is label) from MNIST .csv file into np array
-    :param row: list of comma separated pixel values
+    :param knownClasses: Window of class values around detected spike in labelled data used to assign correct label to spike
+    :param waveform: list of comma separated pixel values
     :param output_nodes: number of output nodes for network
     :return: returns numpy array of (28*28=) 784 input values and 10 target output values (for digits 0-9)
     """
+    assert isinstance(knownClasses, pd.Series)
+
+    # Retrieve non-zero spike labels from list of known spike labels in window either side of detected spike
+    possibleLabels = knownClasses[4:-2][knownClasses != 0].values
+
+    # If no non-zero spike labels are detected, extend window range and try again
+    if len(possibleLabels) == 0:
+        possibleLabels = knownClasses[knownClasses != 0].values
+
+        # If still no non-zero spike labels are detected, raise an error because the spike detected could be a false positive
+        if len(possibleLabels) == 0:
+            raise Warning("No labels detectable for detected spike with index {}. label window: {}".format(knownClasses.index, knownClasses))
+
+    # If more than one non-zero spike labels are detected within the window, assert they are all the same, raise error if not
+    if len(possibleLabels) > 1:
+        try:
+            assert (possibleLabels[0] == possibleLabels).all()
+        except AssertionError:
+            # More than two knownClass labels for a single spike at: 54412, 87433, 165493, 232479, 299250, 312319, 339791, 472193, 980407
+            # raise Warning("All spikes labelled with more than one class in the given training dataset should have been removed.")
+            #TODO: remove those spikes from training set
+            pass
+
     # Retrieve the target label and account for non-zero count
-    label = int(row['knownClass']) - 1
+    label = possibleLabels[0] - 1
 
     # Retrieve waveform points as inputs array
-    inputs = row['waveform']
+    inputs = waveform
 
     # Create the target output values (all 0.01, except the desired label which is 0.99)
     targets = np.zeros(output_nodes) + 0.01
@@ -346,4 +373,4 @@ def getInputsAndTargets(row, output_nodes):
     inputs = np.array(inputs.tolist(), ndmin=2).T
     targets = np.array(targets.tolist(), ndmin=2).T
 
-    return inputs, targets
+    return inputs, targets, label

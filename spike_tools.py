@@ -20,7 +20,7 @@ def joinSpikes(data, spikes):
     return data
 
 
-def splitData(data, trainingShare=0.8):
+def splitData(data, predictedSpikeIndexes, trainingShare=0.8):
 
     try:
         assert all(col in data.columns for col in ['knownSpike', 'knownClass', 'predictedSpike', 'predictedClass'])
@@ -30,8 +30,15 @@ def splitData(data, trainingShare=0.8):
     # Get split index
     splitIndex = int(data.shape[0] * trainingShare)
 
+    data_training = data.iloc[:splitIndex]
+    data_validation = data.iloc[splitIndex:]
+
+    lastTrainingSpike = len(data_training[data_training['predictedSpike'] == True])
+    spikeIndexes_training = predictedSpikeIndexes[:lastTrainingSpike]
+    spikeIndexes_validation = predictedSpikeIndexes[lastTrainingSpike:]
+
     # Return training and validation data
-    return data.iloc[:splitIndex], data.iloc[splitIndex:]
+    return data_training, data_validation, spikeIndexes_training, spikeIndexes_validation
 
 def bandPassFilter(signal, lowCut=300.00, highCut=3000.00, sampleRate=25000, order=1):
     # TODO: Calculate something
@@ -61,9 +68,9 @@ def detectPeaks(data, threshold=0.85):
     # Create series of
     s = pd.Series(peaks.index)
 
-    doubleCounts = s.loc[s-s.shift(1)<10]
+    doubleCounts = s.loc[s-s.shift(1)<15]
 
-    # Drop indexes of detected peaks if they occur within 10 points of another peak and store as spike indexes
+    # Drop indexes of detected peaks if they occur within 15 points of another peak and store as spike indexes
     # Detected spike indexes are shifted by X points to align with labeled dataset used during training and improve similarity to waveforms expected by MLP model
     spikeIndexes = peaks.index.drop(labels=doubleCounts) - 8
 
