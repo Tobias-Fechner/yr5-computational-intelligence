@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import nn_spikes
 
-def dataPreProcess(df, spikeLocations=pd.DataFrame([]), threshold=0.85, submission=False, waveformSignalType='original'):
+def dataPreProcess(df, spikeLocations=pd.DataFrame([]), threshold=0.85, submission=False, waveformSignalType='original', bpFilterOrder=1):
     try:
         assert spikeLocations.shape[0] != 0
         data = joinSpikes(df, spikeLocations)
@@ -16,7 +16,7 @@ def dataPreProcess(df, spikeLocations=pd.DataFrame([]), threshold=0.85, submissi
     data.insert(len(data.columns), 'predictedSpike', False)
     data.insert(len(data.columns), 'predictedClass', 0)
 
-    data['signalFiltered'] = bandPassFilter(data['signal'])
+    data['signalFiltered'] = bandPassFilter(data['signal'], order=bpFilterOrder)
 
     data, predictedSpikeIndexes = detectPeaks(data, threshold=threshold)
     data = getSpikeWaveforms(predictedSpikeIndexes, data, waveformSignalType=waveformSignalType)
@@ -60,14 +60,20 @@ def splitData(data, spikeIndexes, trainingShare=0.8):
     # Return training and validation data
     return data_training, data_validation, spikeIndexes_training, spikeIndexes_validation
 
-def bandPassFilter(signal, lowCut=300.00, highCut=3000.00, sampleRate=25000, order=1):
-    # TODO: Calculate something
+def bandPassFilter(signal, lowCut=300.00, highCut=3000.00, sampleRate=25000, order=1, filterType='band'):
+
     nyq = 0.5 * sampleRate
     low = lowCut / nyq
     high = highCut / nyq
 
-    # Generate filter coefficients for butterworth filter
-    b, a = butter(order, [low, high], btype='bandpass')
+    if 'band' in filterType:
+        # Generate filter coefficients for butterworth filter
+        b, a = butter(order, [low, high], btype='bandpass')
+    elif 'high' in filterType:
+        # Generate filter coefficients for butterworth filter
+        b, a = butter(order, low, btype='high')
+    else:
+        b, a = (None, None)
 
     signalFiltered = lfilter(b, a, signal)
     return signalFiltered
@@ -206,7 +212,7 @@ def classifySpikesMLP(waveforms, nn):
     return predictions
 
 
-def getAverageWaveforms(data_training, spikeIndexes_training):
+def getAverageWaveforms(data_training, spikeIndexes_training, classToPlot=1):
     for index in spikeIndexes_training:
         _, _, label = nn_spikes.getInputsAndTargets(data_training.loc[index, 'waveform'], 4,
                                           data_training.loc[index - 10:index + 5, 'knownClass'])
@@ -218,8 +224,13 @@ def getAverageWaveforms(data_training, spikeIndexes_training):
     class3 = detectedSpikes[detectedSpikes['knownClass'] == 3]['waveform']
     class4 = detectedSpikes[detectedSpikes['knownClass'] == 4]['waveform']
 
-    for classWaveforms in [class1, class2, class3, class4]:
-        stack = np.vstack(classWaveforms.values)
+    classes = {'class1': class1,
+               'class2': class2,
+               'class3': class3,
+               'class4': class4}
+
+    for i in classes.keys():
+        stack = np.vstack(classes[i].values)
         np.average(stack[:, 0])
 
         avgs = []
@@ -228,11 +239,12 @@ def getAverageWaveforms(data_training, spikeIndexes_training):
             colAvg = np.average(stack[:, col])
             avgs.append(colAvg)
 
-        class4 = pd.Series([avgs]).append(class4)
+        classes[i] = pd.Series([avgs]).append(classes[i])
 
     fig = go.Figure()
+    key = list(classes.keys())[classToPlot]
 
-    for trace in class4[1:]:
+    for trace in classes[key][1:]:
         fig.add_trace(go.Scatter(x=np.linspace(0, 100, 101),
                                  y=trace,
                                  mode='lines',
@@ -241,7 +253,7 @@ def getAverageWaveforms(data_training, spikeIndexes_training):
                                  ))
 
     fig.add_trace(go.Scatter(x=np.linspace(0, 100, 101),
-                             y=class4[0],
+                             y=classes[key][0],
                              mode='lines', ))
 
     fig.show()
