@@ -2,8 +2,9 @@ from scipy.signal import butter, lfilter
 import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
+import nn_spikes
 
-def dataPreProcess(df, spikeLocations=pd.DataFrame([]), threshold=0.85, submission=False):
+def dataPreProcess(df, spikeLocations=pd.DataFrame([]), threshold=0.85, submission=False, waveformSignalType='original'):
     try:
         assert spikeLocations.shape[0] != 0
         data = joinSpikes(df, spikeLocations)
@@ -18,7 +19,7 @@ def dataPreProcess(df, spikeLocations=pd.DataFrame([]), threshold=0.85, submissi
     data['signalFiltered'] = bandPassFilter(data['signal'])
 
     data, predictedSpikeIndexes = detectPeaks(data, threshold=threshold)
-    data = getSpikeWaveforms(predictedSpikeIndexes, data)
+    data = getSpikeWaveforms(predictedSpikeIndexes, data, waveformSignalType=waveformSignalType)
 
     data_training, data_validation, spikeIndexes_training, spikeIndexes_validation = splitData(data, predictedSpikeIndexes)
 
@@ -107,9 +108,10 @@ def detectPeaks(data, threshold=0.85):
 
     return data, spikeIndexes.values
 
-def getSpikeWaveforms(peakIndexes, data, window=100):
+def getSpikeWaveforms(peakIndexes, data, window=60, waveformSignalType='original'):
     """
 
+    :param waveformSignalType:
     :param peakIndexes:
     :param data:
     :param window:
@@ -123,8 +125,14 @@ def getSpikeWaveforms(peakIndexes, data, window=100):
     # Iterate over each detected spike
     for index in peakIndexes:
 
-        # Retrieve a window of signal values
-        waveform = data.loc[index - int(window / 4):index + int(3 / 4 * window), 'signal'].tolist()
+        if 'original' in waveformSignalType:
+            # Retrieve a window of signal values
+            waveform = data.loc[index - int(window / 4):index + int(3 / 4 * window), 'signal'].tolist()
+        elif 'filtered' in waveformSignalType:
+            # Retrieve a window of filtered signal values
+            waveform = data.loc[index - int(window / 4):index + int(3 / 4 * window), 'signalFiltered'].tolist()
+        else:
+            raise ValueError("Specify either original or filtered signal to get waveform. Nothing else exists.")
 
         # Filter waveform to make it less noisy
         # TODO: Review this filter please.
@@ -196,3 +204,44 @@ def classifySpikesMLP(waveforms, nn):
         predictions.append(prediction+1)
 
     return predictions
+
+
+def getAverageWaveforms(data_training, spikeIndexes_training):
+    for index in spikeIndexes_training:
+        _, _, label = nn_spikes.getInputsAndTargets(data_training.loc[index, 'waveform'], 4,
+                                          data_training.loc[index - 10:index + 5, 'knownClass'])
+        data_training.loc[index, 'knownClass'] = label + 1
+
+    detectedSpikes = data_training.loc[spikeIndexes_training]
+    class1 = detectedSpikes[detectedSpikes['knownClass'] == 1]['waveform']
+    class2 = detectedSpikes[detectedSpikes['knownClass'] == 2]['waveform']
+    class3 = detectedSpikes[detectedSpikes['knownClass'] == 3]['waveform']
+    class4 = detectedSpikes[detectedSpikes['knownClass'] == 4]['waveform']
+
+    for classWaveforms in [class1, class2, class3, class4]:
+        stack = np.vstack(classWaveforms.values)
+        np.average(stack[:, 0])
+
+        avgs = []
+
+        for col in range(stack.shape[1]):
+            colAvg = np.average(stack[:, col])
+            avgs.append(colAvg)
+
+        class4 = pd.Series([avgs]).append(class4)
+
+    fig = go.Figure()
+
+    for trace in class4[1:]:
+        fig.add_trace(go.Scatter(x=np.linspace(0, 100, 101),
+                                 y=trace,
+                                 mode='lines',
+                                 line=dict(color='black'),
+                                 opacity=0.1,
+                                 ))
+
+    fig.add_trace(go.Scatter(x=np.linspace(0, 100, 101),
+                             y=class4[0],
+                             mode='lines', ))
+
+    fig.show()
