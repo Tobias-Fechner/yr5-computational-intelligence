@@ -225,8 +225,8 @@ def batchTrain(data_training,
             batchEnd += batchSize
 
         # Collect performance on training and validation datasets for each epoch
-        successTraining, data_training.loc[spikeIndexes_training, 'classPrediction'] = test(data_training, spikeIndexes_training, nn)
-        successValidation, data_validation.loc[spikeIndexes_validation, 'classPrediction'] = test(data_validation, spikeIndexes_validation, nn)
+        successTraining = test(data_training, spikeIndexes_training, nn)
+        successValidation = test(data_validation, spikeIndexes_validation, nn)
 
         trainingCurve.append(successTraining)
         validationCurve.append(successValidation)
@@ -245,7 +245,7 @@ def batchTrain(data_training,
             # Step-decay learning rate for given number of epochs
             nn.decayLR(epoch, lrInitial)
 
-    return nn, trainingCurve, validationCurve, data_training, data_validation
+    return nn, trainingCurve, validationCurve
 
 def test(data, spikeIndexes, nn):
 
@@ -254,7 +254,6 @@ def test(data, spikeIndexes, nn):
 
     # Create an empty string to accumulate the count of correct predictions
     scorecard = []
-    predicted = []
 
     # Train the network for each row in the batch
     for index in spikeIndexes:
@@ -270,13 +269,10 @@ def test(data, spikeIndexes, nn):
         else:
             scorecard.append(0)
 
-        # Correct label predicted to account for non-zero counting of neuron types and append to list of classified action potentials
-        predicted.append(prediction+1)
-
     scorecard = np.asarray(scorecard)
     successRate = (scorecard.sum() / scorecard.size) * 100
 
-    return successRate, predicted
+    return successRate
 
 def checkEarlyStop(performances, epoch, patience, patienceInitial, window=5, tolerance=0.05):
     """

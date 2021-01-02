@@ -1,6 +1,31 @@
 from scipy.signal import butter, lfilter
 import plotly.graph_objects as go
 import pandas as pd
+import numpy as np
+
+def dataPreProcess(df, spikeLocations=pd.DataFrame([]), threshold=0.85, submission=False):
+    try:
+        assert spikeLocations.shape[0] != 0
+        data = joinSpikes(df, spikeLocations)
+        knownSpikeIndexes = data[data['knownSpike'] == True].index
+        data = getSpikeWaveforms(knownSpikeIndexes, data)
+    except AssertionError:
+        data = df
+
+    data.insert(len(data.columns), 'predictedSpike', False)
+    data.insert(len(data.columns), 'predictedClass', 0)
+
+    data['signalFiltered'] = bandPassFilter(data['signal'])
+
+    data, predictedSpikeIndexes = detectPeaks(data, threshold=threshold)
+    data = getSpikeWaveforms(predictedSpikeIndexes, data)
+
+    data_training, data_validation, spikeIndexes_training, spikeIndexes_validation = splitData(data, predictedSpikeIndexes)
+
+    if submission:
+        return data, predictedSpikeIndexes
+    else:
+        return data_training, data_validation, spikeIndexes_training, spikeIndexes_validation
 
 def joinSpikes(data, spikes):
 
@@ -8,24 +33,16 @@ def joinSpikes(data, spikes):
         # Create 2 new columns for spike data and prepare 2 additional columns for predicted spike data
         data.insert(len(data.columns), 'knownSpike', False)
         data.insert(len(data.columns), 'knownClass', 0)
-        data.insert(len(data.columns), 'predictedSpike', False)
-        data.insert(len(data.columns), 'predictedClass', 0)
 
         # Store spike data in new columns
         data.loc[spikes['index'], 'knownSpike'] = True
         data.loc[spikes['index'], 'knownClass'] = spikes['class'].values
     else:
-        print("Spike data already exists, just returning input data.")
+        print("Known spikes already included, returning with original data.")
 
     return data
 
-
 def splitData(data, spikeIndexes, trainingShare=0.8):
-
-    try:
-        assert all(col in data.columns for col in ['knownSpike', 'knownClass', 'predictedSpike', 'predictedClass'])
-    except AssertionError:
-        raise AssertionError("Prep your data please. Run joinSpikes().")
 
     # Get split index
     splitIndex = int(data.shape[0] * trainingShare)
@@ -54,7 +71,6 @@ def bandPassFilter(signal, lowCut=300.00, highCut=3000.00, sampleRate=25000, ord
     signalFiltered = lfilter(b, a, signal)
     return signalFiltered
 
-
 def detectPeaks(data, threshold=0.85):
     df = data.loc[data['signalFiltered'] > threshold]
 
@@ -76,11 +92,20 @@ def detectPeaks(data, threshold=0.85):
     # Detected spike indexes are shifted by X points to align with labeled dataset used during training and improve similarity to waveforms expected by MLP model
     spikeIndexes = peaks.index.drop(labels=doubleCounts) - 8
 
+    # Truncate negative indexes to zero (used for submission dataset)
+    if len(spikeIndexes[spikeIndexes < 1]) > 0:
+        # Cast to series to make mutable
+        spikeIndexes = spikeIndexes.to_series()
+        # Truncate negative indexes to 1. This is the case as in the submission dataset with more noise it is likely
+        # that a spike will be detected within the first 8 points.
+        spikeIndexes[spikeIndexes < 1] = 1
+        print("Truncated index of {} detected peaks to one.".format(len(spikeIndexes[spikeIndexes == 1])))
+
     data.loc[spikeIndexes, 'predictedSpike'] = True
 
     print("{} peaks detected.".format(len(spikeIndexes)))
 
-    return data, spikeIndexes
+    return data, spikeIndexes.values
 
 def getSpikeWaveforms(peakIndexes, data, window=100):
     """
@@ -148,3 +173,26 @@ def plotSpikes(signals, spikes):
         ))
 
     fig.show()
+
+def classifySpikesMLP(waveforms, nn):
+
+    # Ensure data is of type pandas dataframe
+    assert isinstance(waveforms, pd.Series)
+
+    # Create an empty string to accumulate the count of correct predictions
+    predictions = []
+
+    # Iterate over each row in the data
+    for waveform in waveforms:
+        inputs = np.array(waveform.tolist(), ndmin=2).T
+
+        # Query the network
+        outputs = nn.query(inputs)
+
+        # Identify predicted label
+        prediction = np.argmax(outputs)
+
+        # Correct label predicted to account for non-zero counting of neuron types and append to list of classified action potentials
+        predictions.append(prediction+1)
+
+    return predictions

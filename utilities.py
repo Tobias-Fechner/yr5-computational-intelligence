@@ -29,7 +29,6 @@ def createResultsRepo(hiddenNodes=(200, 500, 700, 900)):
 
     return results
 
-
 def plotLearningCurves(results):
     fig = go.Figure()
 
