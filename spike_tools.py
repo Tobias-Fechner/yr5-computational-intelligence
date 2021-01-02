@@ -1,10 +1,10 @@
-from scipy.signal import butter, lfilter
+from scipy.signal import butter, lfilter, savgol_filter
 import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
 import nn_spikes
 
-def dataPreProcess(df, spikeLocations=pd.DataFrame([]), threshold=0.85, submission=False, waveformSignalType='original', bpFilterOrder=1):
+def dataPreProcess(df, spikeLocations=pd.DataFrame([]), threshold=0.85, submission=False, detectPeaksOn='signalSavgolBP', waveformSignalType='signalSavgol'):
     try:
         assert spikeLocations.shape[0] != 0
         data = joinSpikes(df, spikeLocations)
@@ -16,10 +16,11 @@ def dataPreProcess(df, spikeLocations=pd.DataFrame([]), threshold=0.85, submissi
     data.insert(len(data.columns), 'predictedSpike', False)
     data.insert(len(data.columns), 'predictedClass', 0)
 
-    data['signalFiltered'] = bandPassFilter(data['signal'], order=bpFilterOrder)
+    data['signalSavgol'] = savgol_filter(data['signal'], 17, 2)
+    data['signalSavgolBP'] = bandPassFilter(data['signalSavgol'])
 
-    data, predictedSpikeIndexes = detectPeaks(data, threshold=threshold)
-    data = getSpikeWaveforms(predictedSpikeIndexes, data, waveformSignalType=waveformSignalType)
+    data, predictedSpikeIndexes = detectPeaks(data, detectPeaksOn=detectPeaksOn, threshold=threshold)
+    data = getSpikeWaveforms(predictedSpikeIndexes, data, signalType=waveformSignalType)
 
     data_training, data_validation, spikeIndexes_training, spikeIndexes_validation = splitData(data, predictedSpikeIndexes)
 
@@ -78,11 +79,11 @@ def bandPassFilter(signal, lowCut=300.00, highCut=3000.00, sampleRate=25000, ord
     signalFiltered = lfilter(b, a, signal)
     return signalFiltered
 
-def detectPeaks(data, threshold=0.85):
-    df = data.loc[data['signalFiltered'] > threshold]
+def detectPeaks(data, detectPeaksOn='signalSavgolBP', threshold=0.85):
+    df = data.loc[data[detectPeaksOn] > threshold]
 
-    peaks = df[(df['signalFiltered'].shift(1) < df['signalFiltered']) &
-               (df['signalFiltered'].shift(-1) < df['signalFiltered'])]
+    peaks = df[(df[detectPeaksOn].shift(1) < df[detectPeaksOn]) &
+               (df[detectPeaksOn].shift(-1) < df[detectPeaksOn])]
 
     # Insert column to store predicted spike info
     if 'predictedSpike' not in data.columns:
@@ -114,15 +115,16 @@ def detectPeaks(data, threshold=0.85):
 
     return data, spikeIndexes.values
 
-def getSpikeWaveforms(peakIndexes, data, window=60, waveformSignalType='original'):
+def getSpikeWaveforms(peakIndexes, data, window=60, signalType='signalSavgol'):
     """
 
-    :param waveformSignalType:
+    :param signalType:
     :param peakIndexes:
     :param data:
     :param window:
     :return:
     """
+    assert signalType in data.columns
 
     # Insert column to store putative spike waveform data
     if 'waveform' not in data.columns:
@@ -131,21 +133,10 @@ def getSpikeWaveforms(peakIndexes, data, window=60, waveformSignalType='original
     # Iterate over each detected spike
     for index in peakIndexes:
 
-        if 'original' in waveformSignalType:
-            # Retrieve a window of signal values
-            waveform = data.loc[index - int(window / 4):index + int(3 / 4 * window), 'signal'].tolist()
-        elif 'filtered' in waveformSignalType:
-            # Retrieve a window of filtered signal values
-            waveform = data.loc[index - int(window / 4):index + int(3 / 4 * window), 'signalFiltered'].tolist()
-        else:
-            raise ValueError("Specify either original or filtered signal to get waveform. Nothing else exists.")
-
-        # Filter waveform to make it less noisy
-        # TODO: Review this filter please.
-        waveformSmooth = bandPassFilter(waveform)
+        waveform = data.loc[index - int(window / 4):index + int(3 / 4 * window), signalType]
 
         # Store waveform values in list
-        data.at[index, 'waveform'] = waveformSmooth
+        data.at[index, 'waveform'] = waveform
 
     return data
 
@@ -212,7 +203,7 @@ def classifySpikesMLP(waveforms, nn):
     return predictions
 
 
-def getAverageWaveforms(data_training, spikeIndexes_training, classToPlot=1):
+def getAverageWaveforms(data_training, spikeIndexes_training, classToPlot=0):
     for index in spikeIndexes_training:
         _, _, label = nn_spikes.getInputsAndTargets(data_training.loc[index, 'waveform'], 4,
                                           data_training.loc[index - 10:index + 5, 'knownClass'])
