@@ -4,17 +4,9 @@ import pandas as pd
 import numpy as np
 import nn_spikes
 
-def dataPreProcess(df, spikeLocations=pd.DataFrame([]), threshold=0.85, submission=False, detectPeaksOn='signalSavgolBP', waveformWindow=60, waveformSignalType='signalSavgol'):
-    try:
-        assert spikeLocations.shape[0] != 0
-        data = joinSpikes(df, spikeLocations)
-        knownSpikeIndexes = data[data['knownSpike'] == True].index
-        data = getSpikeWaveforms(knownSpikeIndexes, data)
-    except AssertionError:
-        data = df
+def dataPreProcess(df, spikeLocations, threshold=0.85, submission=False, detectPeaksOn='signalSavgolBP', waveformWindow=60, waveformSignalType='signalSavgol'):
 
-    data.insert(len(data.columns), 'predictedSpike', False)
-    data.insert(len(data.columns), 'predictedClass', 0)
+    data = df
 
     data['signalSavgol'] = savgol_filter(data['signal'], 17, 2)
     data['signalSavgolBP'] = bandPassFilter(data['signalSavgol'])
@@ -22,27 +14,82 @@ def dataPreProcess(df, spikeLocations=pd.DataFrame([]), threshold=0.85, submissi
     data, predictedSpikeIndexes = detectPeaks(data, detectPeaksOn=detectPeaksOn, threshold=threshold)
     data = getSpikeWaveforms(predictedSpikeIndexes, data, window=waveformWindow, signalType=waveformSignalType)
 
-    data_training, data_validation, spikeIndexes_training, spikeIndexes_validation = splitData(data, predictedSpikeIndexes)
-
     if submission:
+        print("Returning with {} detected spikes.".format(len(predictedSpikeIndexes)))
         return data, predictedSpikeIndexes
     else:
+        data = joinKnownSpikeClasses(data, spikeLocations)
+        # Assign known labels and drop any detected spikes that refer to more than one label
+        data, predictedSpikeIndexes = assignKnownClassesToDetectedSpikes(data, predictedSpikeIndexes)
+
+        data_training, data_validation, spikeIndexes_training, spikeIndexes_validation = splitData(data, predictedSpikeIndexes)
+
+        print("Returning with {} detected spikes.".format(len(predictedSpikeIndexes)))
         return data_training, data_validation, spikeIndexes_training, spikeIndexes_validation
 
-def joinSpikes(data, spikes):
+
+def joinKnownSpikeClasses(data, spikes):
 
     if not 'knownSpike' in data.columns:
         # Create 2 new columns for spike data and prepare 2 additional columns for predicted spike data
         data.insert(len(data.columns), 'knownSpike', False)
-        data.insert(len(data.columns), 'knownClass', 0)
+        data.insert(len(data.columns), 'knownClass', None)
 
         # Store spike data in new columns
         data.loc[spikes['index'], 'knownSpike'] = True
-        data.loc[spikes['index'], 'knownClass'] = spikes['class'].values
+        data.loc[spikes['index'], 'knownClass'] = spikes['class'].values - 1 # adjustment of classes to count from zero
     else:
         print("Known spikes already included, returning with original data.")
 
     return data
+
+def assignKnownClassesToDetectedSpikes(data, predictedSpikeIndexes):
+    print("Assigning known classes to detected spikes.")
+    duffLabels = []
+
+    data.insert(len(data.columns), 'assignedKnownClass', None)
+
+    # Retrieve non-zero spike labels from list of known spike labels in window either side of detected spike
+    for index in predictedSpikeIndexes:
+        knownClasses = data.loc[index - 10:index + 5, 'knownClass']
+        possibleLabels = knownClasses[4:-2][knownClasses != 0].values
+
+        # If no non-zero spike labels are detected, extend window range and try again
+        if len(possibleLabels) == 0:
+            possibleLabels = knownClasses[knownClasses != 0].values
+            # If still no non-zero spike labels are detected, raise an error because the spike detected could be a false positive
+            if len(possibleLabels) == 0:
+                raise Warning(
+                    "No labels detectable for detected spike with index {}. label window: {}".format(knownClasses.index,
+                                                                                                     knownClasses))
+
+        # If more than one non-zero spike labels are detected within the window, assert they are all the same, raise error if not
+        if len(possibleLabels) > 1:
+            try:
+                assert (possibleLabels[0] == possibleLabels).all()
+            except AssertionError:
+                # More than two knownClass labels for a single spike found at indexes: 54412, 87433, 165493, 232479, 299250, 312319, 339791, 472193, 980407
+                data.loc[index, 'assignedKnownClass'] = 666
+                duffLabels.append(index)
+                continue
+
+        # Retrieve the target label and account for non-zero count
+        data.loc[index, 'assignedKnownClass'] = possibleLabels[0]
+
+    # Drop all detected peaks that resemble spikes labelled with two different labels as these may cause inaccuracies in the model training
+    if len(duffLabels) > 0:
+        # Use list comprehension to retrieve indexes of duff labels within list of predicted spike indexes
+        duffLocations = [np.where(predictedSpikeIndexes == a)[0][0] for a in duffLabels]
+        # Create np array of Trues of same shape as list of predicted spike indexes
+        mask = np.ones(len(predictedSpikeIndexes), dtype=bool)
+        # Set all elements at those indexes to false
+        mask[duffLocations] = False
+        # Filter the list of predicted spike indexes to drop the spikes with duff labels
+        predictedSpikeIndexes = predictedSpikeIndexes[mask]
+        print("Dropped {} detected spikes that relate to more than one label. (Indexes: {})".format(len(duffLocations),
+                                                                                                    duffLabels))
+
+    return data, predictedSpikeIndexes
 
 def splitData(data, spikeIndexes, trainingShare=0.8):
 
@@ -80,16 +127,15 @@ def bandPassFilter(signal, lowCut=300.00, highCut=3000.00, sampleRate=25000, ord
     return signalFiltered
 
 def detectPeaks(data, detectPeaksOn='signalSavgolBP', threshold=0.85):
+
     df = data.loc[data[detectPeaksOn] > threshold]
 
     peaks = df[(df[detectPeaksOn].shift(1) < df[detectPeaksOn]) &
                (df[detectPeaksOn].shift(-1) < df[detectPeaksOn])]
 
-    # Insert column to store predicted spike info
-    if 'predictedSpike' not in data.columns:
-        data.insert(len(data.columns), 'predictedSpike', False)
-    if 'predictedClass' not in data.columns:
-        data.insert(len(data.columns), 'predictedClass', 0)
+    # Insert columns to store predicted spike info
+    data.insert(len(data.columns), 'predictedSpike', False)
+    data.insert(len(data.columns), 'predictedClass', 0)
 
     # Create series of
     s = pd.Series(peaks.index)
@@ -139,7 +185,6 @@ def getSpikeWaveforms(peakIndexes, data, window=60, signalType='signalSavgol'):
         data.at[index, 'waveform'] = waveform.reset_index(drop=True)
 
     return data
-
 
 def plotSpikes(signals, spikes):
     """
@@ -202,60 +247,36 @@ def classifySpikesMLP(waveforms, nn):
 
     return predictions
 
-
 def getAverageWaveforms(data_training, spikeIndexes_training, classToPlot=0):
-    # Loop over each index of a detected spike
-    for index in spikeIndexes_training:
-        # Get just the label associated with this spike by comparing it to all possible labels within a window of 10 preceeding and
-        # 5 succeeding points of spike index, looking in the labelled data column (given spike locations)
-        _, _, label = nn_spikes.getInputsAndTargets(data_training.loc[index, 'waveform'], 4,
-                                          data_training.loc[index - 10:index + 5, 'knownClass'])
-
-        # Store label and adjust for non-zero indexing
-        data_training.loc[index, 'knownClass'] = label + 1
 
     # Retrieve a dataframe containing only spike entries and select all whose class is 1, 2, 3... etc. for the waveform column.
     # The result is one dataframe with all the spike waveforms for a given class
     detectedSpikes = data_training.loc[spikeIndexes_training]
-    class1 = detectedSpikes[detectedSpikes['knownClass'] == 1]['waveform']
-    class2 = detectedSpikes[detectedSpikes['knownClass'] == 2]['waveform']
-    class3 = detectedSpikes[detectedSpikes['knownClass'] == 3]['waveform']
-    class4 = detectedSpikes[detectedSpikes['knownClass'] == 4]['waveform']
+    classWaveforms = detectedSpikes[detectedSpikes['assignedKnownClass'] == classToPlot]['waveform']
 
-    # Store this dataframes in a dictionary
-    classes = {'class1': class1,
-               'class2': class2,
-               'class3': class3,
-               'class4': class4}
+    # Create vertical stack of all waveform values for that class and take average
+    stack = np.vstack(classWaveforms.values)
+    np.average(stack[:, 0])
 
-    # Loop over each of these dataframes and create a numpy array of waveform values stacked vertically. This is to allow you
-    # to calculate the mean of the first points, second points, etc. whilst leveraging vectorisation
-    for i in classes.keys():
-        # Create vertical stack of all waveform values for that class and take average
-        stack = np.vstack(classes[i].values)
-        np.average(stack[:, 0])
+    # Create new list ready to store average values
+    avgs = []
 
-        # Create new list ready to store average values
-        avgs = []
+    # Loop over each column in stacked waveform values. This is equivalent to going point by point through the waveforms and taking
+    # the averages of values at that point for all waveforms in that class
+    for col in range(stack.shape[1]):
+        colAvg = np.average(stack[:, col])
+        # Store average of that point in a list. List will be of same length that the window is when extracting the waveforms
+        avgs.append(colAvg)
 
-        # Loop over each column in stacked waveform values. This is equivalent to going point by point through the waveforms and taking
-        # the averages of values at that point for all waveforms in that class
-        for col in range(stack.shape[1]):
-            colAvg = np.average(stack[:, col])
-            # Store average of that point in a list. List will be of same length that the window is when extracting the waveforms
-            avgs.append(colAvg)
-
-        # Store list of averages by casting to a series and appending at start of original store of waveforms
-        # (this is to make indexing it straightforward as classes will contain different number of waveforms)
-        classes[i] = pd.Series([avgs]).append(classes[i])
+    # Store list of averages by casting to a series and appending at start of original store of waveforms
+    # (this is to make indexing it straightforward as classes will contain different number of waveforms)
+    classWaveforms = pd.Series([avgs]).append(classWaveforms)
 
     # Create new plotly figure
     fig = go.Figure()
-    # Retrieve which class is intended to be plotted
-    key = list(classes.keys())[classToPlot]
 
     # Plot all waveforms on the same figure, with 10% opacity. Then plot the average waveform in full opacity.
-    for trace in classes[key][1:]:
+    for trace in classWaveforms[1:]:
         fig.add_trace(go.Scatter(x=np.linspace(0, 100, 101),
                                  y=trace,
                                  mode='lines',
@@ -264,7 +285,7 @@ def getAverageWaveforms(data_training, spikeIndexes_training, classToPlot=0):
                                  ))
 
     fig.add_trace(go.Scatter(x=np.linspace(0, 100, 101),
-                             y=classes[key][0],
+                             y=classWaveforms[0],
                              mode='lines', ))
 
     fig.show()

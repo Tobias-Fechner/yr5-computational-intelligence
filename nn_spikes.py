@@ -215,7 +215,7 @@ def batchTrain(data_training,
             for index in spikeIndexes_training:
 
                 # Retrieve the inputs (spike waveforms) and target vectors (spike classes) to the network
-                inputs, targets, _ = getInputsAndTargets(data_training.loc[index, 'waveform'], nn.output_nodes, batch.loc[index-10:index+5, 'knownClass'])
+                inputs, targets = getInputsAndTargets(data_training.loc[index, 'waveform'], nn.output_nodes, batch.loc[index, 'assignedKnownClass'])
 
                 # Complete one cycle of forward propagation, error calculation and back propagation to update the network weights
                 nn.fit(inputs, targets)
@@ -257,14 +257,15 @@ def test(data, spikeIndexes, nn):
 
     # Train the network for each row in the batch
     for index in spikeIndexes:
+        knownClass = data.loc[index, 'assignedKnownClass']
         # Retrieve the inputs (spike waveforms) and target vectors (spike classes) to the network
-        inputs, _, label = getInputsAndTargets(data.loc[index, 'waveform'], nn.output_nodes, data.loc[index-10:index+5, 'knownClass'])
+        inputs, _ = getInputsAndTargets(data.loc[index, 'waveform'], nn.output_nodes, knownClass)
 
         # Query the network to identify the predicted output
         prediction = nn.query(inputs)
 
         # Add to scorecard
-        if prediction == label:
+        if prediction == knownClass:
             scorecard.append(1)
         else:
             scorecard.append(0)
@@ -323,50 +324,24 @@ def plotLearningCurve(epoch, trainingCurve, validationCurve):
     plt.legend()
     plt.show()
 
-def getInputsAndTargets(waveform, output_nodes, knownClasses):
+def getInputsAndTargets(waveform, output_nodes, knownClass):
     """
     Function simply converts row of pixel data (plus first item is label) from MNIST .csv file into np array
-    :param knownClasses: Window of class values around detected spike in labelled data used to assign correct label to spike
+    :param knownClass: Window of class values around detected spike in labelled data used to assign correct label to spike
     :param waveform: list of comma separated pixel values
     :param output_nodes: number of output nodes for network
     :return: returns numpy array of (28*28=) 784 input values and 10 target output values (for digits 0-9)
     """
-    assert isinstance(knownClasses, pd.Series)
-
-    # Retrieve non-zero spike labels from list of known spike labels in window either side of detected spike
-    possibleLabels = knownClasses[4:-2][knownClasses != 0].values
-
-    # If no non-zero spike labels are detected, extend window range and try again
-    if len(possibleLabels) == 0:
-        possibleLabels = knownClasses[knownClasses != 0].values
-
-        # If still no non-zero spike labels are detected, raise an error because the spike detected could be a false positive
-        if len(possibleLabels) == 0:
-            raise Warning("No labels detectable for detected spike with index {}. label window: {}".format(knownClasses.index, knownClasses))
-
-    # If more than one non-zero spike labels are detected within the window, assert they are all the same, raise error if not
-    if len(possibleLabels) > 1:
-        try:
-            assert (possibleLabels[0] == possibleLabels).all()
-        except AssertionError:
-            # More than two knownClass labels for a single spike at: 54412, 87433, 165493, 232479, 299250, 312319, 339791, 472193, 980407
-            # raise Warning("All spikes labelled with more than one class in the given training dataset should have been removed.")
-            #TODO: remove those spikes from training set
-            pass
-
-    # Retrieve the target label and account for non-zero count
-    label = possibleLabels[0] - 1
-
-    # Retrieve waveform points as inputs array
-    inputs = waveform
+    assert knownClass in [0,1,2,3], "Known class should be in [0,1,2,3]."
+    assert isinstance(waveform, pd.Series), "Waveform extract should have been stored as a pandas Series object."
 
     # Create the target output values (all 0.01, except the desired label which is 0.99)
     targets = np.zeros(output_nodes) + 0.01
 
     # pixelValues[0] is the target label for this record
-    targets[label] = 0.99
+    targets[knownClass] = 0.99
 
-    inputs = np.array(inputs.tolist(), ndmin=2).T
+    inputs = np.array(waveform.tolist(), ndmin=2).T
     targets = np.array(targets.tolist(), ndmin=2).T
 
-    return inputs, targets, label
+    return inputs, targets
