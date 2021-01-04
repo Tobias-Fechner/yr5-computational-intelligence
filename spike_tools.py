@@ -2,7 +2,7 @@ from scipy.signal import butter, lfilter, savgol_filter
 import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
-import nn_spikes
+from nn_spikes import getInputsAndTargets
 
 def dataPreProcess(df, spikeLocations, threshold=0.85, submission=False, detectPeaksOn='signalSavgolBP', waveformWindow=60, waveformSignalType='signalSavgol'):
 
@@ -33,7 +33,7 @@ def joinKnownSpikeClasses(data, spikes):
     if not 'knownSpike' in data.columns:
         # Create 2 new columns for spike data and prepare 2 additional columns for predicted spike data
         data.insert(len(data.columns), 'knownSpike', False)
-        data.insert(len(data.columns), 'knownClass', None)
+        data.insert(len(data.columns), 'knownClass', -1)
 
         # Store spike data in new columns
         data.loc[spikes['index'], 'knownSpike'] = True
@@ -51,30 +51,33 @@ def assignKnownClassesToDetectedSpikes(data, predictedSpikeIndexes):
 
     # Retrieve non-zero spike labels from list of known spike labels in window either side of detected spike
     for index in predictedSpikeIndexes:
-        knownClasses = data.loc[index - 10:index + 5, 'knownClass']
-        possibleLabels = knownClasses[4:-2][knownClasses != 0].values
+        knownClassesWindow = data.loc[index - 10:index + 5, 'knownClass']
+        possibleClasses = knownClassesWindow[4:-2][knownClassesWindow != -1].values
 
         # If no non-zero spike labels are detected, extend window range and try again
-        if len(possibleLabels) == 0:
-            possibleLabels = knownClasses[knownClasses != 0].values
+        if len(possibleClasses) == 0:
+            possibleClasses = knownClassesWindow[knownClassesWindow != 0].values
             # If still no non-zero spike labels are detected, raise an error because the spike detected could be a false positive
-            if len(possibleLabels) == 0:
+            if len(possibleClasses) == 0:
                 raise Warning(
-                    "No labels detectable for detected spike with index {}. label window: {}".format(knownClasses.index,
-                                                                                                     knownClasses))
+                    "No labels detectable for detected spike with index {}. label window: {}".format(knownClassesWindow.index,
+                                                                                                     knownClassesWindow))
+
+        assert isinstance(possibleClasses, np.ndarray)
+        #assert possibleClasses.flat[0] == np.int, "Numpy array of possible classes contains non-integers: {}".format(possibleClasses)
 
         # If more than one non-zero spike labels are detected within the window, assert they are all the same, raise error if not
-        if len(possibleLabels) > 1:
+        if len(possibleClasses) > 1:
             try:
-                assert (possibleLabels[0] == possibleLabels).all()
+                assert len(np.unique(possibleClasses)) == 1
             except AssertionError:
-                # More than two knownClass labels for a single spike found at indexes: 54412, 87433, 165493, 232479, 299250, 312319, 339791, 472193, 980407
+                # More than two knownClass labels for a single spike found
                 data.loc[index, 'assignedKnownClass'] = 666
                 duffLabels.append(index)
                 continue
 
         # Retrieve the target label and account for non-zero count
-        data.loc[index, 'assignedKnownClass'] = possibleLabels[0]
+        data.loc[index, 'assignedKnownClass'] = possibleClasses[0]
 
     # Drop all detected peaks that resemble spikes labelled with two different labels as these may cause inaccuracies in the model training
     if len(duffLabels) > 0:
@@ -135,7 +138,7 @@ def detectPeaks(data, detectPeaksOn='signalSavgolBP', threshold=0.85):
 
     # Insert columns to store predicted spike info
     data.insert(len(data.columns), 'predictedSpike', False)
-    data.insert(len(data.columns), 'predictedClass', 0)
+    data.insert(len(data.columns), 'predictedClass', -1)
 
     # Create series of
     s = pd.Series(peaks.index)
@@ -234,16 +237,10 @@ def classifySpikesMLP(waveforms, nn):
 
     # Iterate over each row in the data
     for waveform in waveforms:
-        inputs = np.array(waveform.tolist(), ndmin=2).T
+        inputs, _ = getInputsAndTargets(waveform, 4, 0)
 
-        # Query the network: output will start from zero
-        outputs = nn.query(inputs)
-
-        # Identify predicted label: predictions
-        prediction = np.argmax(outputs)
-
-        # Correct label predicted to account for non-zero counting of neuron types and append to list of classified action potentials
-        predictions.append(prediction+1)
+        # Query the network and append results to prediction store
+        predictions.append(nn.query(inputs))
 
     return predictions
 
