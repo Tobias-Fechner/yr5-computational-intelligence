@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import nn_spikes
 
-def dataPreProcess(df, spikeLocations=pd.DataFrame([]), threshold=0.85, submission=False, detectPeaksOn='signalSavgolBP', waveformSignalType='signalSavgol'):
+def dataPreProcess(df, spikeLocations=pd.DataFrame([]), threshold=0.85, submission=False, detectPeaksOn='signalSavgolBP', waveformWindow=60, waveformSignalType='signalSavgol'):
     try:
         assert spikeLocations.shape[0] != 0
         data = joinSpikes(df, spikeLocations)
@@ -20,7 +20,7 @@ def dataPreProcess(df, spikeLocations=pd.DataFrame([]), threshold=0.85, submissi
     data['signalSavgolBP'] = bandPassFilter(data['signalSavgol'])
 
     data, predictedSpikeIndexes = detectPeaks(data, detectPeaksOn=detectPeaksOn, threshold=threshold)
-    data = getSpikeWaveforms(predictedSpikeIndexes, data, signalType=waveformSignalType)
+    data = getSpikeWaveforms(predictedSpikeIndexes, data, window=waveformWindow, signalType=waveformSignalType)
 
     data_training, data_validation, spikeIndexes_training, spikeIndexes_validation = splitData(data, predictedSpikeIndexes)
 
@@ -136,7 +136,7 @@ def getSpikeWaveforms(peakIndexes, data, window=60, signalType='signalSavgol'):
         waveform = data.loc[index - int(window / 4):index + int(3 / 4 * window), signalType]
 
         # Store waveform values in list
-        data.at[index, 'waveform'] = waveform
+        data.at[index, 'waveform'] = waveform.reset_index(drop=True)
 
     return data
 
@@ -191,10 +191,10 @@ def classifySpikesMLP(waveforms, nn):
     for waveform in waveforms:
         inputs = np.array(waveform.tolist(), ndmin=2).T
 
-        # Query the network
+        # Query the network: output will start from zero
         outputs = nn.query(inputs)
 
-        # Identify predicted label
+        # Identify predicted label: predictions
         prediction = np.argmax(outputs)
 
         # Correct label predicted to account for non-zero counting of neuron types and append to list of classified action potentials
@@ -204,37 +204,57 @@ def classifySpikesMLP(waveforms, nn):
 
 
 def getAverageWaveforms(data_training, spikeIndexes_training, classToPlot=0):
+    # Loop over each index of a detected spike
     for index in spikeIndexes_training:
+        # Get just the label associated with this spike by comparing it to all possible labels within a window of 10 preceeding and
+        # 5 succeeding points of spike index, looking in the labelled data column (given spike locations)
         _, _, label = nn_spikes.getInputsAndTargets(data_training.loc[index, 'waveform'], 4,
                                           data_training.loc[index - 10:index + 5, 'knownClass'])
+
+        # Store label and adjust for non-zero indexing
         data_training.loc[index, 'knownClass'] = label + 1
 
+    # Retrieve a dataframe containing only spike entries and select all whose class is 1, 2, 3... etc. for the waveform column.
+    # The result is one dataframe with all the spike waveforms for a given class
     detectedSpikes = data_training.loc[spikeIndexes_training]
     class1 = detectedSpikes[detectedSpikes['knownClass'] == 1]['waveform']
     class2 = detectedSpikes[detectedSpikes['knownClass'] == 2]['waveform']
     class3 = detectedSpikes[detectedSpikes['knownClass'] == 3]['waveform']
     class4 = detectedSpikes[detectedSpikes['knownClass'] == 4]['waveform']
 
+    # Store this dataframes in a dictionary
     classes = {'class1': class1,
                'class2': class2,
                'class3': class3,
                'class4': class4}
 
+    # Loop over each of these dataframes and create a numpy array of waveform values stacked vertically. This is to allow you
+    # to calculate the mean of the first points, second points, etc. whilst leveraging vectorisation
     for i in classes.keys():
+        # Create vertical stack of all waveform values for that class and take average
         stack = np.vstack(classes[i].values)
         np.average(stack[:, 0])
 
+        # Create new list ready to store average values
         avgs = []
 
+        # Loop over each column in stacked waveform values. This is equivalent to going point by point through the waveforms and taking
+        # the averages of values at that point for all waveforms in that class
         for col in range(stack.shape[1]):
             colAvg = np.average(stack[:, col])
+            # Store average of that point in a list. List will be of same length that the window is when extracting the waveforms
             avgs.append(colAvg)
 
+        # Store list of averages by casting to a series and appending at start of original store of waveforms
+        # (this is to make indexing it straightforward as classes will contain different number of waveforms)
         classes[i] = pd.Series([avgs]).append(classes[i])
 
+    # Create new plotly figure
     fig = go.Figure()
+    # Retrieve which class is intended to be plotted
     key = list(classes.keys())[classToPlot]
 
+    # Plot all waveforms on the same figure, with 10% opacity. Then plot the average waveform in full opacity.
     for trace in classes[key][1:]:
         fig.add_trace(go.Scatter(x=np.linspace(0, 100, 101),
                                  y=trace,
