@@ -48,7 +48,7 @@ def plotLearningCurves(results):
     fig.show()
 
 def getConfusion(actual, predicted):
-    labels = [0, 1, 2, 3]
+    labels = (1, 2, 3, 4)
     np.set_printoptions(precision=2)
 
     cm = confusion_matrix(actual, predicted, labels=labels)
@@ -57,7 +57,7 @@ def getConfusion(actual, predicted):
     plotConfusion(cm)
     print(cr)
 
-def plotConfusion(matrix, x=(0, 1, 2, 3), y=(0, 1, 2, 3)):
+def plotConfusion(matrix, x=(1, 2, 3, 4), y=(1, 2, 3, 4)):
     # change each element of z to type string for annotations
     matrixText = [[str(y) for y in x] for x in matrix]
 
@@ -65,13 +65,10 @@ def plotConfusion(matrix, x=(0, 1, 2, 3), y=(0, 1, 2, 3)):
     fig = ff.create_annotated_heatmap(matrix, x=x, y=y, annotation_text=matrixText, colorscale='Viridis')
 
     # add title
-    fig.update_layout(title_text='<i><b>Confusion matrix</b></i>',
-                      # xaxis = dict(title='x'),
-                      # yaxis = dict(title='x')
-                      )
+    fig.update_layout(title_text='<i><b>Confusion matrix</b></i>')
 
     # add custom xaxis title
-    fig.add_annotation(dict(font=dict(color="black", size=14),
+    fig.add_annotation(dict(font=dict(color="black", size=17),
                             x=0.5,
                             y=-0.15,
                             showarrow=False,
@@ -80,7 +77,7 @@ def plotConfusion(matrix, x=(0, 1, 2, 3), y=(0, 1, 2, 3)):
                             yref="paper"))
 
     # add custom yaxis title
-    fig.add_annotation(dict(font=dict(color="black", size=14),
+    fig.add_annotation(dict(font=dict(color="black", size=17),
                             x=-0.35,
                             y=0.5,
                             showarrow=False,
