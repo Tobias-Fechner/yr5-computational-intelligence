@@ -215,7 +215,7 @@ def batchTrain(data_training,
             for index in spikeIndexes_training:
 
                 # Retrieve the inputs (spike waveforms) and target vectors (spike classes) to the network
-                inputs, targets = getInputsAndTargets(data_training.loc[index, 'waveform'], nn.output_nodes, batch.loc[index, 'assignedKnownClass'])
+                inputs, targets = getInputsAndTargets(data_training.loc[index, 'waveform'], nn.output_nodes, int(batch.loc[index, 'assignedKnownClass']))
 
                 # Complete one cycle of forward propagation, error calculation and back propagation to update the network weights
                 nn.fit(inputs, targets)
@@ -332,7 +332,7 @@ def getInputsAndTargets(waveform, output_nodes, knownClass):
     :param output_nodes: number of output nodes for network
     :return: returns numpy array of (28*28=) 784 input values and 10 target output values (for digits 0-9)
     """
-    assert knownClass in [0,1,2,3], "Known class should be in [0,1,2,3]."
+    assert knownClass in [0,1,2,3], "Known class should be in [0,1,2,3]. INFO:\n Waveform[:5]: {}, \nknownClass{}".format(waveform[:5], knownClass)
     assert isinstance(waveform, pd.Series), "Waveform extract should have been stored as a pandas Series object."
 
     # Create the target output values (all 0.01, except the desired label which is 0.99)

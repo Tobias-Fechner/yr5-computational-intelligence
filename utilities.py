@@ -17,7 +17,6 @@ def getBatchSize(batchSize, lenData):
         assert lenData % batchSize == 0
         pass
 
-
 def createResultsRepo(hiddenNodes=(200, 500, 700, 900)):
     results = {}
     for depth in hiddenNodes:

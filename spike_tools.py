@@ -8,10 +8,13 @@ def dataPreProcess(df, spikeLocations, threshold=0.85, submission=False, detectP
 
     data = df
 
-    data['signalSavgol'] = savgol_filter(data['signal'], 17, 2)
-    data['signalSavgolBP'] = bandPassFilter(data['signalSavgol'])
+    if not 'signalSavgol' in data.columns:
+        data['signalSavgol'] = savgol_filter(data['signal'], 17, 2)
+        data['signalSavgolBP'] = bandPassFilter(data['signalSavgol'])
+        data, predictedSpikeIndexes = detectPeaks(data, detectPeaksOn=detectPeaksOn, threshold=threshold)
+    else:
+         predictedSpikeIndexes = data[data['predictedSpike'] == True].index
 
-    data, predictedSpikeIndexes = detectPeaks(data, detectPeaksOn=detectPeaksOn, threshold=threshold)
     data = getSpikeWaveforms(predictedSpikeIndexes, data, window=waveformWindow, signalType=waveformSignalType)
 
     if submission:
@@ -23,6 +26,7 @@ def dataPreProcess(df, spikeLocations, threshold=0.85, submission=False, detectP
         data, predictedSpikeIndexes = assignKnownClassesToDetectedSpikes(data, predictedSpikeIndexes)
 
         data_training, data_validation, spikeIndexes_training, spikeIndexes_validation = splitData(data, predictedSpikeIndexes)
+        data=0
 
         print("Returning with {} detected spikes.".format(len(predictedSpikeIndexes)))
         return data_training, data_validation, spikeIndexes_training, spikeIndexes_validation
@@ -39,58 +43,62 @@ def joinKnownSpikeClasses(data, spikes):
         data.loc[spikes['index'], 'knownSpike'] = True
         data.loc[spikes['index'], 'knownClass'] = spikes['class'].values - 1 # adjustment of classes to count from zero
     else:
-        print("Known spikes already included, returning with original data.")
+        print("Known spikes already included. Returning with original data.")
 
     return data
 
 def assignKnownClassesToDetectedSpikes(data, predictedSpikeIndexes):
-    print("Assigning known classes to detected spikes.")
-    duffLabels = []
 
-    data.insert(len(data.columns), 'assignedKnownClass', None)
+    if 'assignedKnownClass' in data.columns:
+        print("Known classes already assigned. Returning with original data.")
+    else:
+        print("Assigning known classes to detected spikes.")
+        duffLabels = []
 
-    # Retrieve non-zero spike labels from list of known spike labels in window either side of detected spike
-    for index in predictedSpikeIndexes:
-        knownClassesWindow = data.loc[index - 10:index + 5, 'knownClass']
-        possibleClasses = knownClassesWindow[4:-2][knownClassesWindow != -1].values
+        data.insert(len(data.columns), 'assignedKnownClass', None)
 
-        # If no non-zero spike labels are detected, extend window range and try again
-        if len(possibleClasses) == 0:
-            possibleClasses = knownClassesWindow[knownClassesWindow != 0].values
-            # If still no non-zero spike labels are detected, raise an error because the spike detected could be a false positive
+        # Retrieve non-zero spike labels from list of known spike labels in window either side of detected spike
+        for index in predictedSpikeIndexes:
+            knownClassesWindow = data.loc[index - 10:index + 5, 'knownClass']
+            possibleClasses = knownClassesWindow[4:-2][knownClassesWindow != -1].values
+
+            # If no non-zero spike labels are detected, extend window range and try again
             if len(possibleClasses) == 0:
-                raise Warning(
-                    "No labels detectable for detected spike with index {}. label window: {}".format(knownClassesWindow.index,
-                                                                                                     knownClassesWindow))
+                possibleClasses = knownClassesWindow[knownClassesWindow != 0].values
+                # If still no non-zero spike labels are detected, raise an error because the spike detected could be a false positive
+                if len(possibleClasses) == 0:
+                    raise Warning(
+                        "No labels detectable for detected spike with index {}. label window: {}".format(knownClassesWindow.index,
+                                                                                                         knownClassesWindow))
 
-        assert isinstance(possibleClasses, np.ndarray)
-        #assert possibleClasses.flat[0] == np.int, "Numpy array of possible classes contains non-integers: {}".format(possibleClasses)
+            assert isinstance(possibleClasses, np.ndarray)
+            #assert possibleClasses.flat[0] == np.int, "Numpy array of possible classes contains non-integers: {}".format(possibleClasses)
 
-        # If more than one non-zero spike labels are detected within the window, assert they are all the same, raise error if not
-        if len(possibleClasses) > 1:
-            try:
-                assert len(np.unique(possibleClasses)) == 1
-            except AssertionError:
-                # More than two knownClass labels for a single spike found
-                data.loc[index, 'assignedKnownClass'] = 666
-                duffLabels.append(index)
-                continue
+            # If more than one non-zero spike labels are detected within the window, assert they are all the same, raise error if not
+            if len(possibleClasses) > 1:
+                try:
+                    assert len(np.unique(possibleClasses)) == 1
+                except AssertionError:
+                    # More than two knownClass labels for a single spike found
+                    data.loc[index, 'assignedKnownClass'] = 666
+                    duffLabels.append(index)
+                    continue
 
-        # Retrieve the target label and account for non-zero count
-        data.loc[index, 'assignedKnownClass'] = possibleClasses[0]
+            # Retrieve the target label and account for non-zero count
+            data.loc[index, 'assignedKnownClass'] = possibleClasses[0]
 
-    # Drop all detected peaks that resemble spikes labelled with two different labels as these may cause inaccuracies in the model training
-    if len(duffLabels) > 0:
-        # Use list comprehension to retrieve indexes of duff labels within list of predicted spike indexes
-        duffLocations = [np.where(predictedSpikeIndexes == a)[0][0] for a in duffLabels]
-        # Create np array of Trues of same shape as list of predicted spike indexes
-        mask = np.ones(len(predictedSpikeIndexes), dtype=bool)
-        # Set all elements at those indexes to false
-        mask[duffLocations] = False
-        # Filter the list of predicted spike indexes to drop the spikes with duff labels
-        predictedSpikeIndexes = predictedSpikeIndexes[mask]
-        print("Dropped {} detected spikes that relate to more than one label. (Indexes: {})".format(len(duffLocations),
-                                                                                                    duffLabels))
+        # Drop all detected peaks that resemble spikes labelled with two different labels as these may cause inaccuracies in the model training
+        if len(duffLabels) > 0:
+            # Use list comprehension to retrieve indexes of duff labels within list of predicted spike indexes
+            duffLocations = [np.where(predictedSpikeIndexes == a)[0][0] for a in duffLabels]
+            # Create np array of Trues of same shape as list of predicted spike indexes
+            mask = np.ones(len(predictedSpikeIndexes), dtype=bool)
+            # Set all elements at those indexes to false
+            mask[duffLocations] = False
+            # Filter the list of predicted spike indexes to drop the spikes with duff labels
+            predictedSpikeIndexes = predictedSpikeIndexes[mask]
+            print("Dropped {} detected spikes that relate to more than one label. (Indexes: {})".format(len(duffLocations),
+                                                                                                        duffLabels))
 
     return data, predictedSpikeIndexes
 
