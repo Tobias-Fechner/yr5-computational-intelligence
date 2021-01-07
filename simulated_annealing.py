@@ -5,11 +5,10 @@ import random
 import pandas as pd
 
 # Simulated annealing function
-def anneal(solution, spikeLocations, iterations=150, alpha=0.1,
-           demand=99.9, variation=0.2, T = 1.0, T_min = 0.001):
+def anneal(solution, spikeLocations, iterations=5, alpha=0.7,
+           demand=99.9, variation=0.2, T = 1.0, T_min = 0.1):
     """
     Function to perform simulated annealing.
-    :param df:
     :param spikeLocations:
     :param solution:
     :param alpha:
@@ -22,13 +21,15 @@ def anneal(solution, spikeLocations, iterations=150, alpha=0.1,
     """
 
     data = pd.read_csv('./datasources/spikes/training_data.csv')
+    data_training, data_validation, spikeIndexes_training, spikeIndexes_validation = dataPreProcess(data, spikeLocations, waveformWindow=100)
 
     # Create new list to store cost values
-    errorValues = []
+    results = []
+    i=1
 
     # Generate and append cost of first solution parameters
-    oldError = __getError(solution, data, spikeLocations, demand=demand)
-    errorValues.append(oldError)
+    oldError = __getError(solution, data_training, data_validation, spikeIndexes_training, spikeIndexes_validation, demand=demand)
+    results.append((T, i, solution, oldError))
 
     # Loop until temp is below min allowable temp
     while T > T_min:
@@ -39,11 +40,9 @@ def anneal(solution, spikeLocations, iterations=150, alpha=0.1,
             # Get new set of solution parameters and generate new cost value using this classification solution
             newSolution = __getNeighbour(solution, variation=variation)
 
-            print("It_{}, oldError = {}, newSolution = {}".format(i, oldError, newSolution))
+            print(results[-1])
 
-            data = pd.read_csv('./datasources/spikes/training_data.csv')
-
-            newError = __getError(newSolution, data, spikeLocations, demand=demand)
+            newError = __getError(newSolution, data_training, data_validation, spikeIndexes_training, spikeIndexes_validation, demand=demand)
 
             # Calculate the acceptance probability
             pA = __acceptanceProbability(oldError, newError, T)
@@ -54,13 +53,13 @@ def anneal(solution, spikeLocations, iterations=150, alpha=0.1,
                 solution = newSolution
                 oldError = newError
 
-            errorValues.append(oldError)
+            results.append((T, i, solution, oldError))
             i += 1
 
         # Decay (cool) the temperature and return to the top
         T = T * alpha
 
-    return solution, oldError, errorValues
+    return results
 
 def __acceptanceProbability(oldError, newError, T):
     """
@@ -73,14 +72,13 @@ def __acceptanceProbability(oldError, newError, T):
     return np.exp((oldError - newError) / T)
 
 # Cost function
-def __getError(supply, df, spikeLocations, demand=99.9):
+def __getError(supply, data_training, data_validation, spikeIndexes_training, spikeIndexes_validation, demand=99.9):
     """
     Function finds error between target performance and achieved performance of latest solution classification
     :param supply: input parameters
     :param demand: target performance
     :return: return error
     """
-    data = df
 
     # Extract next set of parameters
     assert isinstance(supply[0], int)
@@ -90,8 +88,6 @@ def __getError(supply, df, spikeLocations, demand=99.9):
     epochs = supply[0]
     hidden_nodes = supply[1]
     lr = supply[2]
-
-    data_training, data_validation, spikeIndexes_training, spikeIndexes_validation = dataPreProcess(data, spikeLocations, waveformWindow=100)
 
     # Train network with new parameters
     nn = NeuralNetwork(input_nodes=len(data_training.loc[spikeIndexes_training[0], 'waveform']),
@@ -105,8 +101,7 @@ def __getError(supply, df, spikeLocations, demand=99.9):
                                        spikeIndexes_training=spikeIndexes_training,
                                        spikeIndexes_validation=spikeIndexes_validation,
                                        nn=nn,
-                                       epochs=epochs,
-                                       plotCurves=False)
+                                       epochs=epochs)
 
     score = validationCurve[-1]
 
@@ -136,15 +131,3 @@ def __getNeighbour(solution, variation=0.2):
     newSolution = np.multiply(solution, a.flatten())
 
     return [int(newSolution[0]), int(newSolution[1]), float(newSolution[2])]
-
-    # TODO: Review if we need the below
-    # new_solution = []
-    #
-    # for i in range(len(solution)):
-    #     parameter = var[i][0] * solution[i]
-    #     # If any of the solutions PCA components, Kn neighbours, P norm
-    #     # is below 0.5 make it 1 as it will give an error.
-    #     if parameter < 0.5:
-    #         parameter = 1
-    #     new_solution.append(parameter)
-    # return new_solution

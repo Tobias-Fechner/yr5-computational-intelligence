@@ -1,6 +1,5 @@
 import scipy.special
 import numpy as np
-import matplotlib.pyplot as plt
 import math
 import pandas as pd
 import utilities
@@ -171,7 +170,6 @@ def batchTrain(data_training,
                nn,
                batchSize=None,
                epochs=20,
-               plotCurves=True,
                patienceInitial=4):
     """
 
@@ -182,7 +180,6 @@ def batchTrain(data_training,
     :param nn:
     :param batchSize:
     :param epochs:
-    :param plotCurves:
     :param patienceInitial:
     :return:
     """
@@ -230,12 +227,6 @@ def batchTrain(data_training,
 
         trainingCurve.append(successTraining)
         validationCurve.append(successValidation)
-
-        # Plot learning curves showing training vs validation performance, useful during development and debugging
-        if plotCurves and epoch > 0:
-            plotLearningCurve(epoch+1, trainingCurve, validationCurve)
-        else:
-            pass
 
         # Check for early stopping opportunity by evaluating if the increase in performance has stagnated
         earlyStopCheck, patience = checkEarlyStop(validationCurve, epoch, patience, patienceInitial)
@@ -310,19 +301,6 @@ def checkEarlyStop(performances, epoch, patience, patienceInitial, window=5, tol
         return False, patience
     else:
         raise Exception("Something wrong happened in the early stop checker.")
-
-def plotLearningCurve(epoch, trainingCurve, validationCurve):
-    try:
-        assert not len(trainingCurve) == 0 and not len(validationCurve) == 0
-    except AssertionError:
-        raise("Training curve data: {}\nValidation curve data: {}\n".format(str(trainingCurve), str(validationCurve)))
-
-    plt.plot(range(epoch), trainingCurve, label='trainingCurve')
-    plt.plot(range(epoch), validationCurve, label='validationCurve')
-    plt.ylabel('performance')
-    plt.xlabel('epochs')
-    plt.legend()
-    plt.show()
 
 def getInputsAndTargets(waveform, output_nodes, knownClass):
     """

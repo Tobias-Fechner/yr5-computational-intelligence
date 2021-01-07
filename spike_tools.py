@@ -4,12 +4,14 @@ import pandas as pd
 import numpy as np
 from nn_spikes import getInputsAndTargets
 
-def dataPreProcess(df, spikeLocations, threshold=0.85, submission=False, detectPeaksOn='signalSavgolBP', waveformWindow=60, waveformSignalType='signalSavgol'):
+def dataPreProcess(data, spikeLocations, threshold=0.85, submission=False, detectPeaksOn='signalSavgolBP', waveformWindow=60, waveformSignalType='signalSavgol'):
 
-    data = df
+    print(data.columns)
 
     if not 'signalSavgol' in data.columns:
-        data['signalSavgol'] = savgol_filter(data['signal'], 17, 2)
+        assert all(pd.notnull(data['signal']))
+        assert all(~np.isinf(data['signal']))
+        data['signalSavgol'] = savgol_filter(data['signal'], 17, 2)                 # Can fail for some Windows builds: https://github.com/matplotlib/matplotlib/issues/18157
         data['signalSavgolBP'] = bandPassFilter(data['signalSavgol'])
         data, predictedSpikeIndexes = detectPeaks(data, detectPeaksOn=detectPeaksOn, threshold=threshold)
     else:
