@@ -17,22 +17,18 @@ def dataPreProcess(data, spikeLocations, threshold=0.85, submission=False, detec
     else:
          predictedSpikeIndexes = data[data['predictedSpike'] == True].index
 
-    data = getSpikeWaveforms(predictedSpikeIndexes, data, window=waveformWindow, signalType=waveformSignalType)
+    assert waveformSignalType in data.columns
+    data['waveform'] = getSpikeWaveforms(data.loc[:, waveformSignalType], predictedSpikeIndexes, window=waveformWindow)
 
-    if submission:
-        print("Returning with {} detected spikes.".format(len(predictedSpikeIndexes)))
-        return data, predictedSpikeIndexes
-    else:
+    if not submission:
         data = joinKnownSpikeClasses(data, spikeLocations)
         # Assign known labels and drop any detected spikes that refer to more than one label
         data, predictedSpikeIndexes = assignKnownClassesToDetectedSpikes(data, predictedSpikeIndexes)
+    else:
+        pass
 
-        data_training, data_validation, spikeIndexes_training, spikeIndexes_validation = splitData(data, predictedSpikeIndexes)
-        data=0
-
-        print("Returning with {} detected spikes.".format(len(predictedSpikeIndexes)))
-        return data_training, data_validation, spikeIndexes_training, spikeIndexes_validation
-
+    print("Returning with {} detected spikes.".format(len(predictedSpikeIndexes)))
+    return data, predictedSpikeIndexes
 
 def joinKnownSpikeClasses(data, spikes):
 
@@ -174,30 +170,27 @@ def detectPeaks(data, detectPeaksOn='signalSavgolBP', threshold=0.85):
 
     return data, spikeIndexes.values
 
-def getSpikeWaveforms(peakIndexes, data, window=60, signalType='signalSavgol'):
+def getSpikeWaveforms(signalData, peakIndexes, window=60):
     """
 
-    :param signalType:
+    :param signalData:
     :param peakIndexes:
-    :param data:
     :param window:
     :return:
     """
-    assert signalType in data.columns
 
-    # Insert column to store putative spike waveform data
-    if 'waveform' not in data.columns:
-        data.insert(len(data.columns), 'waveform', None)
+    s = pd.Series(index=signalData.index, dtype=object, name='waveform')
+    waveforms = []
 
     # Iterate over each detected spike
     for index in peakIndexes:
 
-        waveform = data.loc[index - int(window / 4):index + int(3 / 4 * window), signalType]
+        waveforms.append(signalData.loc[index - int(window / 4):index + int(3 / 4 * window)].reset_index(drop=True))
 
-        # Store waveform values in list
-        data.at[index, 'waveform'] = waveform.reset_index(drop=True)
+    # Store waveform values in list
+    s.loc[peakIndexes] = pd.Series(waveforms, index=peakIndexes)
 
-    return data
+    return s
 
 def plotSpikes(signals, spikes):
     """

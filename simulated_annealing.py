@@ -1,14 +1,15 @@
 import numpy as np
 from nn_spikes import NeuralNetwork, batchTrain
-from spike_tools import dataPreProcess
+from spike_tools import dataPreProcess, getSpikeWaveforms, splitData
 import random
 import pandas as pd
 
 # Simulated annealing function
-def anneal(solution, spikeLocations, iterations=5, alpha=0.7,
-           demand=99.9, variation=0.2, T = 1.0, T_min = 0.1):
+def anneal(solution, spikeLocations, iterations=5, alpha=0.6,
+           demand=99.9, variation=0.3, T = 1.0, T_min = 0.1, epochs=25):
     """
     Function to perform simulated annealing.
+    :param epochs:
     :param spikeLocations:
     :param solution:
     :param alpha:
@@ -21,14 +22,17 @@ def anneal(solution, spikeLocations, iterations=5, alpha=0.7,
     """
 
     data = pd.read_csv('./datasources/spikes/training_data.csv')
-    data_training, data_validation, spikeIndexes_training, spikeIndexes_validation = dataPreProcess(data, spikeLocations, waveformWindow=100)
+    data, predictedSpikeIndexes = dataPreProcess(data, spikeLocations, waveformWindow=solution[0])
+
+    data_training, data_validation, spikeIndexes_training, spikeIndexes_validation = splitData(data, predictedSpikeIndexes)
 
     # Create new list to store cost values
     results = []
     i=1
 
     # Generate and append cost of first solution parameters
-    oldError = __getError(solution, data_training, data_validation, spikeIndexes_training, spikeIndexes_validation, demand=demand)
+    oldError = __getError(solution, data_training, data_validation, spikeIndexes_training,
+                          spikeIndexes_validation, demand=demand, epochs=epochs)
     results.append((T, i, solution, oldError))
 
     # Loop until temp is below min allowable temp
@@ -42,7 +46,11 @@ def anneal(solution, spikeLocations, iterations=5, alpha=0.7,
 
             print(results[-1])
 
-            newError = __getError(newSolution, data_training, data_validation, spikeIndexes_training, spikeIndexes_validation, demand=demand)
+            data['waveform'] = getSpikeWaveforms(data['signalSavgol'], predictedSpikeIndexes, window=newSolution[0])
+            data_training, data_validation, spikeIndexes_training, spikeIndexes_validation = splitData(data, predictedSpikeIndexes)
+
+            newError = __getError(newSolution, data_training, data_validation, spikeIndexes_training,
+                                  spikeIndexes_validation, demand=demand, epochs=epochs)
 
             # Calculate the acceptance probability
             pA = __acceptanceProbability(oldError, newError, T)
@@ -59,7 +67,7 @@ def anneal(solution, spikeLocations, iterations=5, alpha=0.7,
         # Decay (cool) the temperature and return to the top
         T = T * alpha
 
-    return results
+    return pd.DataFrame(results, columns=['Temperature', 'Iteration', 'Solution', 'Error'])
 
 def __acceptanceProbability(oldError, newError, T):
     """
@@ -72,7 +80,7 @@ def __acceptanceProbability(oldError, newError, T):
     return np.exp((oldError - newError) / T)
 
 # Cost function
-def __getError(supply, data_training, data_validation, spikeIndexes_training, spikeIndexes_validation, demand=99.9):
+def __getError(supply, data_training, data_validation, spikeIndexes_training, spikeIndexes_validation, demand=99.9, epochs=25):
     """
     Function finds error between target performance and achieved performance of latest solution classification
     :param supply: input parameters
@@ -85,7 +93,6 @@ def __getError(supply, data_training, data_validation, spikeIndexes_training, sp
     assert isinstance(supply[1], int)
     assert isinstance(supply[2], float)
 
-    epochs = supply[0]
     hidden_nodes = supply[1]
     lr = supply[2]
 
