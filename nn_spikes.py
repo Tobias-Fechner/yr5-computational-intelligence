@@ -40,17 +40,22 @@ class NeuralNetwork:
         """
 
         # Forward propagate inputs through network
-        final_inputs = self.forwardProp(inputs)
+        self.forwardProp(inputs)
 
         # Calculate output error with selected error function, default == 'difference'
         output_errors = self.errorFunc(targets, self.finalActivations)
 
         # Backwards propagate
-        self.backProp(inputs, output_errors, final_inputs, targets)
+        self.backProp(inputs, output_errors)
 
         return output_errors
 
     def forwardProp(self, inputs):
+        """
+        Forward propagate the activations of each neuron from the input layer to the output layer
+        :param inputs: array of input values
+        :return: returns the weighted inputs to the final layer
+        """
         # Calculate weighted input into hidden layer
         hidden_inputs = np.dot(self.wih, inputs)
 
@@ -65,17 +70,15 @@ class NeuralNetwork:
 
         return final_inputs
 
-    def backProp(self, inputs_array, output_errors, final_inputs, targets):
+    def backProp(self, inputs_array, output_errors):
+        """
+        Back propagate the neuron activations from the error in the output layer to update the weights in the network
+        :param inputs_array: array of input values
+        :param output_errors: error in each neuron of the output layer
+        :return: returns nothing as weights are updated and stored in the object's state
+        """
         # Hidden layer errors are the output errors, split by the weights, recombined at the hidden nodes
         hidden_errors = np.dot(self.who.T, output_errors)
-
-        # # Derivatives for output layer weights updates
-        # activationDeriv = self.activationDeriv(final_inputs)
-        # errorDeriv = self.errorDeriv(self.finalActivations, targets)
-        # inputsDeriv = np.transpose(self.hiddenActivations)
-        #
-        # # Combine all the derivatives for the links between the hidden and output layers
-        # self.who += self.lr * np.dot(errorDeriv, activationDeriv, inputsDeriv)
 
         # Update the weights for the links between the hidden and output layers
         self.who += self.lr * np.dot((output_errors * self.finalActivations * (1.0 - self.finalActivations)),
@@ -87,9 +90,9 @@ class NeuralNetwork:
 
     def query(self, inputs):
         """
-        Function used to query the neural network: pass one set of inputs and retrieve one set of predictions from the outputs.
-        :param inputs: List of input values
-        :return: Returns outputs from final layer of nodes
+        Function used to query the neural network: pass one set of inputs and retrieve one prediction from the outputs.
+        :param inputs: array-like of input values
+        :return: returns max output from final layer of nodes
         """
         # Convert the inputs list into a 2D array and use to calculate signals into hidden layer
         hidden_inputs = np.dot(self.wih, inputs)
@@ -127,6 +130,11 @@ class NeuralNetwork:
 
     @staticmethod
     def getActivationFuncs(activation_function):
+        """
+        Function used to generalise the network configuration to use a configurable activation function during training.
+        :param activation_function: string indicating which activation function should be used
+        :return: returns a lambda function which can be applied during training
+        """
         if activation_function == 'sigmoid':
             func = lambda x: scipy.special.expit(x)
             funcPrime = lambda x: scipy.special.expit(x) * (1 - scipy.special.expit(x))
@@ -146,6 +154,11 @@ class NeuralNetwork:
 
     @staticmethod
     def getErrorFuncs(error_function):
+        """
+        Function allows for the generalisation of error functions used to evaluate the network outputs
+        :param error_function: string indicating which error function to use
+        :return: returns lambda function that can be applied during training of the network
+        """
         if error_function == 'difference':
             func = lambda x1, x2: np.subtract(x1, x2)
             funcPrime = None
@@ -172,26 +185,33 @@ def batchTrain(data_training,
                epochs=20,
                patienceInitial=4):
     """
-
-    :param data_training:
-    :param data_validation:
-    :param spikeIndexes_training:
-    :param spikeIndexes_validation:
-    :param nn:
-    :param batchSize:
-    :param epochs:
-    :param patienceInitial:
-    :return:
+    Function trains the supplied neural network on the training data and generates a performance based on both training and
+    validation datasets to produce learning curves for diagnostics. Adaptive learning rate is implemented, which decays after
+    a number of cycles to more precisely locate the local minimum.
+    :param data_training: training dataset
+    :param data_validation: validation dataset
+    :param spikeIndexes_training: list-like of spike locations within training dataset
+    :param spikeIndexes_validation: list-like of spike locations within validation dataset
+    :param nn: neural network to fit to data
+    :param batchSize: not implemented, but could be used to implement mini-batch stochastic gradient descent to improve training time
+    :param epochs: number of times to train the network for
+    :param patienceInitial: initial patience used to specify for how many epochs the network will be trained after validation performance
+    has decreased below the minimum allowable level of variance. useful to help trigger a further decay of LR and improve max performance achievable
+    :return: returns the neural network and the training and validation curves used for diagnostics
     """
 
+    # Assert the datasets are of the desired data type: pandas dataframes
     assert isinstance(data_training, pd.DataFrame) and isinstance(data_validation, pd.DataFrame)
 
+    # Create empty lists to store training and validation curve data
     trainingCurve = []
     validationCurve = []
+
+    # Store the initial learning rate in the neural network attribute and create a new patience variable that will be changed
     lrInitial = getattr(nn, 'lr')
     patience = patienceInitial
 
-    # Allocate batch sizes for batch training. If no batch size specified, take full dataset as single batch (batch gradient descent)
+    # Allocate batch sizes for batch training. If no batch size specified, take full dataset as single batch (stochastic gradient descent)
     batchSize = utilities.getBatchSize(batchSize, data_training.shape[0])
 
     # Train for n training cycles, where n = number of epochs
@@ -211,7 +231,7 @@ def batchTrain(data_training,
             # Train the network for each row in the batch
             for index in spikeIndexes_training:
 
-                # Retrieve the inputs (spike waveforms) and target vectors (spike classes) to the network
+                # Retrieve the inputs (spike waveforms) and target vectors (spike classes) to the network for the given spike
                 inputs, targets = getInputsAndTargets(data_training.loc[index, 'waveform'], nn.output_nodes, int(batch.loc[index, 'assignedKnownClass']))
 
                 # Complete one cycle of forward propagation, error calculation and back propagation to update the network weights
@@ -239,6 +259,13 @@ def batchTrain(data_training,
     return nn, trainingCurve, validationCurve
 
 def test(data, spikeIndexes, nn):
+    """
+    Function evaluates the performance of the network classification, and returns a performance score.
+    :param data: data to classify
+    :param spikeIndexes: spike indexes to locate spikes in the data
+    :param nn: neural network used for classification
+    :return: performance of classification as precision of classification
+    """
 
     # Ensure data is of type pandas dataframe
     assert isinstance(data, pd.DataFrame)
@@ -246,21 +273,25 @@ def test(data, spikeIndexes, nn):
     # Create an empty string to accumulate the count of correct predictions
     scorecard = []
 
-    # Train the network for each row in the batch
+    # Iterate over each spike and query the trained neural network
     for index in spikeIndexes:
+
+        # Identify the known class of the spike, which has been assigned based on the labelled data
         knownClass = data.loc[index, 'assignedKnownClass']
-        # Retrieve the inputs (spike waveforms) and target vectors (spike classes) to the network
+
+        # Retrieve only the inputs (spike waveforms) to the network
         inputs, _ = getInputsAndTargets(data.loc[index, 'waveform'], nn.output_nodes, knownClass)
 
-        # Query the network to identify the predicted output
+        # Query the network to identify the predicted output for teh given spike waveform
         prediction = nn.query(inputs)
 
-        # Add to scorecard
+        # Add to scorecard if classification is correct
         if prediction == knownClass:
             scorecard.append(1)
         else:
             scorecard.append(0)
 
+    # Calculate accuracy of network to correctly classify detected spikes (precision)
     scorecard = np.asarray(scorecard)
     successRate = (scorecard.sum() / scorecard.size) * 100
 
@@ -268,16 +299,15 @@ def test(data, spikeIndexes, nn):
 
 def checkEarlyStop(performances, epoch, patience, patienceInitial, window=5, tolerance=0.05):
     """
-    Function evaluates the variance of the network over the trailing window
-    :param performances:
-    :param epoch:
-    :param patience:
-    :param patienceInitial:
-    :param window:
-    :param tolerance:
-    :return:
+    Function evaluates the variance of the network over the trailing window of performance
+    :param performances: performance to detect variance in
+    :param epoch: current epoch
+    :param patience: current value of patience - this decreases between consecutive epochs below the performance variance threshold
+    :param patienceInitial: initial patience to reset to when variance rises above threshold
+    :param window: window of performance values to evaluate variance over
+    :param tolerance: variance tolerance
+    :return: returns boolean indicating if training should be stopped and the correct patience value
     """
-    # TODO: Implement gradient check of performances to stop early if validation performance starts to decrease.
     # Check for opportunity for early stopping
     if len(performances) >= window:
         mean = sum(performances[-window:]) / window
@@ -304,21 +334,24 @@ def checkEarlyStop(performances, epoch, patience, patienceInitial, window=5, tol
 
 def getInputsAndTargets(waveform, output_nodes, knownClass):
     """
-    Function simply converts row of pixel data (plus first item is label) from MNIST .csv file into np array
-    :param knownClass: Window of class values around detected spike in labelled data used to assign correct label to spike
-    :param waveform: list of comma separated pixel values
+    Function takes in spike waveform extract and generates input array to network. Also generates target array for output network
+    based on the known class of the spike.
+    :param knownClass: window of class values around detected spike in labelled data used to assign correct label to spike
+    :param waveform: spike waveform signal values - mV extracellular recordings from electrode at 25kHz frequency
     :param output_nodes: number of output nodes for network
-    :return: returns numpy array of (28*28=) 784 input values and 10 target output values (for digits 0-9)
+    :return: input array to network and target array for output nodes
     """
+    # Assert function parameters are of expected values and data types
     assert knownClass in [0,1,2,3], "Known class should be in [0,1,2,3]. INFO:\n Waveform[:5]: {}, \nknownClass{}".format(waveform[:5], knownClass)
     assert isinstance(waveform, pd.Series), "Waveform extract should have been stored as a pandas Series object."
 
     # Create the target output values (all 0.01, except the desired label which is 0.99)
     targets = np.zeros(output_nodes) + 0.01
 
-    # pixelValues[0] is the target label for this record
+    # Store near-one value for target node, correlating to known spike class
     targets[knownClass] = 0.99
 
+    # Cast and reshape inputs and targets array into standard format suitable for network
     inputs = np.array(waveform.tolist(), ndmin=2).T
     targets = np.array(targets.tolist(), ndmin=2).T
 
