@@ -29,6 +29,8 @@ def dataPreProcess(data, spikeLocations, threshold=0.85, submission=False, detec
         # Filter the original signal with a Savitzky-Golay filter, and filter the result with a bandpass filter
         data['signalSavgol'] = savgol_filter(data['signal'], 17, 2)                 # Can fail for some Windows builds: https://github.com/matplotlib/matplotlib/issues/18157
         data['signalSavgolBP'] = bandPassFilter(data['signalSavgol'])
+        data['signalHP'] = bandPassFilter(data['signal'], lowCut=100, filterType='high')
+        data['signalHPSavgol'] = savgol_filter(data['signalHP'], 17, 2)
 
         # Detect peaks in provided signal, returned as index positions
         data, predictedSpikeIndexes = detectPeaks(data, detectPeaksOn=detectPeaksOn, threshold=threshold)
@@ -83,13 +85,13 @@ def joinKnownSpikeClasses(data, spikes):
 def assignKnownClassesToDetectedSpikes(data, predictedSpikeIndexes):
     """
     Function checks for known labels in window around predicted spike where it would reasonably expect a known spike to be.
-    Hard fail here for when the spike is a false positive and no known label is detected, in line with te
+    Hard fail here for when the spike is a false positive and no known label is detected, in line with the
     marking criteria on the assessment sheet.
     :param data: data containing all signal, predicted spike information, and other pre-processed data so far
     :param predictedSpikeIndexes: a list-like containing all predicted spike locations
     :return: return the same data table with known class labels shifted, and the list of predicted spike indexes but
     with the spike referring to more than one label removed, so as not to be used in training and therefore obscure the
-    learned waveforms. Roughly 8-10 spikes of this kind were regularly detected.
+    learned waveforms. Roughly 30-35 spikes of this kind were regularly detected.
     """
 
     # Check if column already exists, and if so, return without further processing.
@@ -121,7 +123,7 @@ def assignKnownClassesToDetectedSpikes(data, predictedSpikeIndexes):
             if len(possibleClasses) == 0:
                 possibleClasses = knownClassesWindow[knownClassesWindow != -1].values
                 # If still no spike labels are detected, raise an error because the spike detected could be a false positive
-                assert len(possibleClasses) == 0, "No labels detectable for detected spike with index {}. label window: {}".format(knownClassesWindow.index,knownClassesWindow)
+                assert len(possibleClasses) != 0, "\nNo labels detectable for detected spike with index {}. \nLabel window: {}\nPossible labels: {}".format(knownClassesWindow.index,knownClassesWindow, possibleClasses)
 
             # Assert the possible classes we detected are of the data type numpy array
             assert isinstance(possibleClasses, np.ndarray)
